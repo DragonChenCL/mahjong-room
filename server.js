@@ -1,5 +1,5 @@
 // 棋牌室麻将服务器 v1（简化规则）
-// 108 张（万/条/筒），定缺，碰/杠/胡，胡牌即结算；无换三张、无血战、无查叫、无番数。
+// 108 张（万/条/筒），无定缺、无风牌，碰/杠/胡，胡牌即结算；无换三张、无血战、无查叫、无番数。
 // 同一个座位协议服务三种玩家：真人（网页点牌）、机器人（本地规则）、agent（WebSocket API）。
 // agent 接入协议见 docs/SKILL.md。
 
@@ -72,10 +72,9 @@ function canMelds(c) {
   }
   return false;
 }
-// hand14：14 张牌；dingque：定缺花色（0 万 1 条 2 筒），胡牌时手牌不能剩定缺花色
-function canHu(hand14, dingque) {
+// hand14：14 张牌
+function canHu(hand14) {
   if (hand14.length !== 14) return false;
-  if (dingque !== null && hand14.some((t) => suitOf(t) === dingque)) return false;
   const c = countsOf(hand14);
   if (c.every((x) => x % 2 === 0)) return true; // 七对子（含四张算两对）
   for (let i = 0; i < 27; i++) {
@@ -87,13 +86,11 @@ function canHu(hand14, dingque) {
   }
   return false;
 }
-function legalDiscards(hand, dingque) {
-  if (dingque === null) return [...hand];
-  const dq = hand.filter((t) => suitOf(t) === dingque);
-  return dq.length ? dq : [...hand];
+function legalDiscards(hand) {
+  return [...hand];
 }
-function botChooseDiscard(hand, dingque) {
-  const legal = [...new Set(legalDiscards(hand, dingque))];
+function botChooseDiscard(hand) {
+  const legal = [...new Set(legalDiscards(hand))];
   const c = countsOf(hand);
   let best = legal[0];
   let bestScore = Infinity;
@@ -108,12 +105,6 @@ function botChooseDiscard(hand, dingque) {
   const reason = bestScore === 0 ? '孤张优先' : bestScore <= 1 ? '拆边张' : '调整搭子';
   return { tile: best, reason };
 }
-function botChooseDingque(hand) {
-  const counts = [0, 1, 2].map((s) => hand.filter((t) => suitOf(t) === s).length);
-  let suit = 0;
-  for (let s = 1; s < 3; s++) if (counts[s] < counts[suit]) suit = s;
-  return suit;
-}
 
 // ---------- 牌桌 ----------
 class Table {
@@ -121,7 +112,7 @@ class Table {
     this.reset();
   }
   reset() {
-    this.seats = [null, null, null, null]; // {kind,name,ws,hand,melds,discards,dingque,won}
+    this.seats = [null, null, null, null]; // {kind,name,ws,hand,melds,discards,won}
     this.spectators = new Set();
     this.phase = 'waiting';
     this.wall = [];
@@ -153,7 +144,7 @@ class Table {
   stateFor(seat) {
     const players = this.seats.map((s) => s ? {
       name: s.name, kind: s.kind, handCount: s.hand.length,
-      melds: s.melds, discards: s.discards, dingque: s.dingque, won: s.won,
+      melds: s.melds, discards: s.discards, won: s.won,
       account: s.account || null,
     } : null);
     return {
@@ -199,19 +190,15 @@ class Table {
     if (seat < 0) return false;
     const p = this.pending;
     if (!p || p.seat !== seat) return false;
-    if (p.kind === 'dingque' && msg.type === 'dingque' && [0, 1, 2].includes(msg.suit)) {
-      p.resolve(msg.suit);
-      return true;
-    }
     if (p.kind === 'discard' && msg.type === 'discard') {
-      const legal = legalDiscards(this.seats[seat].hand, this.seats[seat].dingque);
+      const legal = legalDiscards(this.seats[seat].hand);
       if (legal.includes(msg.tile)) { p.resolve({ action: 'discard', tile: msg.tile }); return true; }
       return false;
     }
     if (p.kind === 'draw_choice' && msg.type === 'draw_choice') {
       if (['win', 'kong', 'discard'].includes(msg.action)) {
         if (msg.action === 'discard') {
-          const legal = legalDiscards(this.seats[seat].hand, this.seats[seat].dingque);
+          const legal = legalDiscards(this.seats[seat].hand);
           if (!legal.includes(msg.tile)) return false;
         }
         p.resolve(msg);
@@ -233,7 +220,7 @@ class Table {
     this.seats[idx] = {
       kind, name: name || (kind === 'human' ? '你' : 'Agent'),
       account: ws.user || null,
-      ws, hand: [], melds: [], discards: [], dingque: null, won: false,
+      ws, hand: [], melds: [], discards: [], won: false,
     };
     this.send(ws, { type: 'joined', seat: idx });
     this.broadcastState();
@@ -254,10 +241,8 @@ class Table {
       if (this.pending && this.pending.seat === seat) {
         const p = this.pending;
         this.pending = null;
-        p.resolve(p.kind === 'dingque' ? botChooseDingque(s.hand)
-          : p.kind === 'claim' ? 'pass'
-          : p.kind === 'discard' ? { action: 'discard', tile: botChooseDiscard(s.hand, s.dingque).tile }
-          : { action: 'discard', tile: botChooseDiscard(s.hand, s.dingque).tile });
+        p.resolve(p.kind === 'claim' ? 'pass'
+          : { action: 'discard', tile: botChooseDiscard(s.hand).tile });
       }
     } else {
       this.seats[seat] = null;
@@ -274,7 +259,7 @@ class Table {
       if (!this.seats[i]) {
         this.seats[i] = {
           kind: 'bot', name: BOT_NAMES[botIdx++ % BOT_NAMES.length], ws: null,
-          hand: [], melds: [], discards: [], dingque: null, won: false,
+          hand: [], melds: [], discards: [], won: false,
         };
       }
     }
@@ -286,31 +271,15 @@ class Table {
     }
     this.seats.forEach((s, i) => {
       s.hand = this.wall.splice(0, i === 0 ? 14 : 13);
-      s.melds = []; s.discards = []; s.dingque = null; s.won = false;
+      s.melds = []; s.discards = []; s.won = false;
     });
     this.turn = 0;
     this.winner = null;
     this.winTile = null;
     this.winKind = null;
     this.logLines = [];
-    this.phase = 'dingque';
-    this.log('开局：108 张（万/条/筒），请定缺');
-    this.broadcastState();
-    // 定缺：真人选，机器人自动选最少花色，agent 也按消息选
-    const picks = this.seats.map(async (s, i) => {
-      if (s.kind === 'bot') {
-        await delay(400 + Math.random() * 600);
-        return botChooseDingque(s.hand);
-      }
-      this.send(s.ws, { type: 'dingque_prompt' });
-      return this.waitFor(i, 'dingque', HUMAN_TIMEOUT_MS, botChooseDingque(s.hand));
-    });
-    const suits = await Promise.all(picks);
-    suits.forEach((suit, i) => {
-      this.seats[i].dingque = suit;
-      this.log(`${this.seats[i].name} 定缺 ${SUITS[suit]}`);
-    });
     this.phase = 'playing';
+    this.log('开局：108 张（万/条/筒），无定缺、无风牌');
     this.broadcastState();
     this.dealerTurn().catch((e) => console.error('dealerTurn error', e));
   }
@@ -319,10 +288,10 @@ class Table {
     // 庄家（0 号座）14 张先出；先判天胡
     const s = this.seats[0];
     this.turn = 0;
-    if (canHu([...s.hand], s.dingque)) {
+    if (canHu([...s.hand])) {
       if (s.kind === 'bot') return this.win(0, null, 'zimo');
       this.send(s.ws, { type: 'draw_prompt', canWin: true, canKong: false });
-      const r = await this.waitFor(0, 'draw_choice', HUMAN_TIMEOUT_MS, { action: 'discard', tile: legalDiscards(s.hand, s.dingque)[0] });
+      const r = await this.waitFor(0, 'draw_choice', HUMAN_TIMEOUT_MS, { action: 'discard', tile: legalDiscards(s.hand)[0] });
       if (r.action === 'win') return this.win(0, null, 'zimo');
       return this.afterDiscard(0, r.tile);
     }
@@ -335,22 +304,22 @@ class Table {
     this.broadcastState();
     if (s.kind === 'bot') {
       await delay(700 + Math.random() * 500);
-      const { tile, reason } = botChooseDiscard(s.hand, s.dingque);
+      const { tile, reason } = botChooseDiscard(s.hand);
       this.thought(seat, `${reason}，打 ${tileName(tile)}`);
       return this.afterDiscard(seat, tile);
     }
     if (s.kind === 'agent') {
-      this.send(s.ws, { type: 'your_turn', hand: [...s.hand], legalDiscards: legalDiscards(s.hand, s.dingque) });
+      this.send(s.ws, { type: 'your_turn', hand: [...s.hand], legalDiscards: legalDiscards(s.hand) });
       const r = await this.waitFor(seat, 'discard', HUMAN_TIMEOUT_MS, null);
       let tile;
-      if (r && legalDiscards(s.hand, s.dingque).includes(r.tile)) tile = r.tile;
-      else tile = botChooseDiscard(s.hand, s.dingque).tile;
+      if (r && legalDiscards(s.hand).includes(r.tile)) tile = r.tile;
+      else tile = botChooseDiscard(s.hand).tile;
       return this.afterDiscard(seat, tile);
     }
     // human：出牌不限时（timeout 传 0 表示不限时）
-    this.send(s.ws, { type: 'your_turn', legalDiscards: legalDiscards(s.hand, s.dingque) });
+    this.send(s.ws, { type: 'your_turn', legalDiscards: legalDiscards(s.hand) });
     const r = await this.waitFor(seat, 'discard', 0, null);
-    return this.afterDiscard(seat, r ? r.tile : legalDiscards(s.hand, s.dingque)[0]);
+    return this.afterDiscard(seat, r ? r.tile : legalDiscards(s.hand)[0]);
   }
 
   async afterDiscard(seat, tile) {
@@ -373,7 +342,7 @@ class Table {
       const s = this.seats[i];
       if (s.won) continue;
       const c = countsOf(s.hand);
-      if (canHu([...s.hand, tile], s.dingque)) canWinList.push(i);
+      if (canHu([...s.hand, tile])) canWinList.push(i);
       else if (c[tile] >= 3) canClaimList.push({ seat: i, actions: ['kong', 'pong'] });
       else if (c[tile] >= 2) canClaimList.push({ seat: i, actions: ['pong'] });
     }
@@ -434,12 +403,12 @@ class Table {
       s.hand.push(rep);
       this.log(`${s.name} 杠后补牌`);
       this.broadcastState();
-      if (canHu([...s.hand], s.dingque)) {
+      if (canHu([...s.hand])) {
         if (s.kind === 'bot') return this.win(seat, null, 'zimo');
         this.send(s.ws, { type: 'draw_prompt', canWin: true, canKong: false });
-        const r = await this.waitFor(seat, 'draw_choice', HUMAN_TIMEOUT_MS, { action: 'discard', tile: legalDiscards(s.hand, s.dingque)[0] });
+        const r = await this.waitFor(seat, 'draw_choice', HUMAN_TIMEOUT_MS, { action: 'discard', tile: legalDiscards(s.hand)[0] });
         if (r.action === 'win') return this.win(seat, null, 'zimo');
-        const legal = legalDiscards(s.hand, s.dingque);
+        const legal = legalDiscards(s.hand);
         return this.afterDiscard(seat, legal.includes(r.tile) ? r.tile : legal[0]);
       }
       return this.discardStep(seat);
@@ -455,7 +424,7 @@ class Table {
     this.turn = seat;
     this.log(`${s.name} 摸牌`);
     this.broadcastState();
-    const win = canHu([...s.hand], s.dingque);
+    const win = canHu([...s.hand]);
     const kongTile = [...new Set(s.hand)].find((t) => countsOf(s.hand)[t] === 4);
     if (s.kind === 'bot') {
       await delay(700 + Math.random() * 500);
@@ -468,16 +437,16 @@ class Table {
         if (this.wall.length === 0) return this.liuju();
         const rep = this.wall.pop();
         s.hand.push(rep);
-        if (canHu([...s.hand], s.dingque)) return this.win(seat, null, 'zimo');
+        if (canHu([...s.hand])) return this.win(seat, null, 'zimo');
         return this.discardStep(seat);
       }
-      const { tile: d, reason } = botChooseDiscard(s.hand, s.dingque);
+      const { tile: d, reason } = botChooseDiscard(s.hand);
       this.thought(seat, `${reason}，打 ${tileName(d)}`);
       return this.afterDiscard(seat, d);
     }
     if (s.kind === 'agent') {
       this.send(s.ws, { type: 'draw_prompt', drawn: tile, canWin: win, canKong: kongTile !== undefined, kongTile });
-      const r = await this.waitFor(seat, 'draw_choice', HUMAN_TIMEOUT_MS, { action: 'discard', tile: legalDiscards(s.hand, s.dingque)[0] });
+      const r = await this.waitFor(seat, 'draw_choice', HUMAN_TIMEOUT_MS, { action: 'discard', tile: legalDiscards(s.hand)[0] });
       if (r.action === 'win') return this.win(seat, null, 'zimo');
       if (r.action === 'kong' && kongTile !== undefined) {
         for (let k = 0; k < 4; k++) s.hand.splice(s.hand.indexOf(kongTile), 1);
@@ -487,14 +456,14 @@ class Table {
         if (this.wall.length === 0) return this.liuju();
         const rep = this.wall.pop();
         s.hand.push(rep);
-        if (canHu([...s.hand], s.dingque)) return this.win(seat, null, 'zimo');
+        if (canHu([...s.hand])) return this.win(seat, null, 'zimo');
         return this.discardStep(seat);
       }
       return this.afterDiscard(seat, r.tile);
     }
     // human
     this.send(s.ws, { type: 'draw_prompt', drawn: tile, canWin: win, canKong: kongTile !== undefined, kongTile });
-    const r = await this.waitFor(seat, 'draw_choice', HUMAN_TIMEOUT_MS, { action: 'discard', tile: legalDiscards(s.hand, s.dingque)[0] });
+    const r = await this.waitFor(seat, 'draw_choice', HUMAN_TIMEOUT_MS, { action: 'discard', tile: legalDiscards(s.hand)[0] });
     if (r.action === 'win') return this.win(seat, null, 'zimo');
     if (r.action === 'kong' && kongTile !== undefined) {
       for (let k = 0; k < 4; k++) s.hand.splice(s.hand.indexOf(kongTile), 1);
@@ -504,7 +473,7 @@ class Table {
       if (this.wall.length === 0) return this.liuju();
       const rep = this.wall.pop();
       s.hand.push(rep);
-      if (canHu([...s.hand], s.dingque)) return this.win(seat, null, 'zimo');
+      if (canHu([...s.hand])) return this.win(seat, null, 'zimo');
       return this.discardStep(seat);
     }
     return this.afterDiscard(seat, r.tile);
@@ -696,8 +665,6 @@ wss.on('connection', (ws) => {
         table.handleMessage(ws, { type: 'draw_choice', action: msg.action, tile: msg.tile });
       } else if (p.kind === 'claim' && ['win', 'pong', 'kong', 'pass'].includes(msg.action)) {
         table.handleMessage(ws, { type: 'claim', action: msg.action });
-      } else if (p.kind === 'dingque' && [0, 1, 2].includes(msg.suit)) {
-        table.handleMessage(ws, { type: 'dingque', suit: msg.suit });
       }
       return;
     }
@@ -710,4 +677,4 @@ wss.on('connection', (ws) => {
 if (require.main === module) {
   server.listen(PORT, () => console.log(`mahjong-room listening on ${PORT}`));
 }
-module.exports = { canHu, countsOf, legalDiscards, botChooseDiscard, botChooseDingque, tileName };
+module.exports = { canHu, countsOf, legalDiscards, botChooseDiscard, tileName };

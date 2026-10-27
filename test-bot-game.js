@@ -3,7 +3,6 @@
 const WebSocket = require('ws');
 
 const URL = process.env.WS_URL || 'ws://localhost:3100';
-const suitOf = (t) => Math.floor(t / 9);
 
 const ws = new WebSocket(URL);
 let you = -1;
@@ -17,11 +16,7 @@ const timer = setTimeout(() => {
 }, 90000);
 
 function legalFromState() {
-  const hand = lastState.hand;
-  const dq = lastState.players[you].dingque;
-  if (dq === null || dq === undefined) return hand;
-  const d = hand.filter((t) => suitOf(t) === dq);
-  return d.length ? d : hand;
+  return lastState.hand;
 }
 function send(o) { ws.send(JSON.stringify(o)); }
 
@@ -41,12 +36,6 @@ ws.on('message', (raw) => {
     send({ type: 'start' });
   } else if (msg.type === 'state') {
     lastState = msg;
-  } else if (msg.type === 'dingque_prompt') {
-    const hand = lastState ? lastState.hand : [];
-    const counts = [0, 1, 2].map((s) => hand.filter((t) => suitOf(t) === s).length);
-    let suit = 0;
-    for (let s = 1; s < 3; s++) if (counts[s] < counts[suit]) suit = s;
-    send({ type: 'dingque', suit });
   } else if (msg.type === 'your_turn') {
     const legal = legalFromState();
     send({ type: 'discard', tile: legal[0] });

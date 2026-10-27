@@ -48,11 +48,7 @@ function meldHTML(m) {
 function legalSet() {
   if (!state || you < 0) return new Set();
   if (awaiting && awaiting.legal) return new Set(awaiting.legal);
-  const hand = state.hand;
-  const dq = state.players[you] ? state.players[you].dingque : null;
-  if (dq === null || dq === undefined) return new Set(hand);
-  const d = hand.filter((t) => suitOf(t) === dq);
-  return new Set(d.length ? d : hand);
+  return new Set(state.hand);
 }
 
 function renderSeats() {
@@ -66,7 +62,7 @@ function renderSeats() {
     const isMe = seatIdx === you;
     const turnCls = state.turn === seatIdx && state.phase === 'playing' ? 'turn' : '';
     el.className = 'seat ' + pos[k] + ' ' + turnCls + (p.kind === 'agent' ? ' seat-agent' : '');
-    let html = `<div class="seat-head">${p.name} ${p.kind === 'bot' ? '· 机器人' : p.kind === 'agent' ? '· Agent' : ''} ${p.dingque !== null && p.dingque !== undefined ? '· 缺' + SUITS[p.dingque] : ''}${p.account ? ' · 已认证' : ''}</div>`;
+    let html = `<div class="seat-head">${p.name} ${p.kind === 'bot' ? '· 机器人' : p.kind === 'agent' ? '· Agent' : ''}${p.account ? ' · 已认证' : ''}</div>`;
     if (p.melds.length) html += `<div class="tiles">${p.melds.map(meldHTML).join('')}</div>`;
     html += `<div class="tiles">${p.discards.map((t) => tileHTML(t, true)).join('')}</div>`;
     if (isMe) {
@@ -97,7 +93,7 @@ function renderSeats() {
     c.innerHTML = '';
   }
   $('wall').textContent = `牌墙剩 ${state.wallLeft} 张`;
-  const phaseText = { waiting: '等待开始', dingque: '定缺中', playing: '进行中', over: '已结算' }[state.phase] || state.phase;
+  const phaseText = { waiting: '等待开始', playing: '进行中', over: '已结算' }[state.phase] || state.phase;
   const turnName = state.phase === 'playing' && state.players[state.turn] ? ` · 轮到 ${state.players[state.turn].name}` : '';
   $('centerHint').textContent = phaseText + turnName;
   // Agent 视角
@@ -105,7 +101,7 @@ function renderSeats() {
     turn: state.turn,
     wallLeft: state.wallLeft,
     lastDiscard: state.lastDiscard,
-    players: state.players.map((p) => p ? { name: p.name, kind: p.kind, handCount: p.handCount, melds: p.melds, discards: p.discards, dingque: p.dingque } : null),
+    players: state.players.map((p) => p ? { name: p.name, kind: p.kind, handCount: p.handCount, melds: p.melds, discards: p.discards } : null),
     hand: state.hand,
   };
   $('agentState').textContent = JSON.stringify(summary, null, 1);
@@ -120,9 +116,6 @@ function renderActions() {
   div.className = 'actions';
   if (!awaiting) {
     if (state && state.phase === 'playing') div.innerHTML = '<span class="hint">等待其他玩家…</span>';
-  } else if (awaiting.kind === 'dingque') {
-    div.innerHTML = '<span class="hint">请选择定缺：</span>' +
-      [0, 1, 2].map((s) => `<button onclick="sendDingque(${s})">缺${SUITS[s]}</button>`).join('');
   } else if (awaiting.kind === 'draw_choice') {
     if (awaiting.canWin) div.innerHTML += '<button onclick="sendDrawChoice(\'win\')">胡</button>';
     if (awaiting.canKong) div.innerHTML += '<button onclick="sendDrawChoice(\'kong\')">杠</button>';
@@ -146,11 +139,6 @@ function onTileClick(t) {
   if (!legalSet().has(t)) return;
   if (awaiting.kind === 'discard') send({ type: 'discard', tile: t });
   else send({ type: 'draw_choice', action: 'discard', tile: t });
-  awaiting = null;
-  renderActions();
-}
-function sendDingque(suit) {
-  send({ type: 'dingque', suit });
   awaiting = null;
   renderActions();
 }
@@ -200,7 +188,6 @@ function onMessage(msg) {
     render();
     return;
   }
-  if (msg.type === 'dingque_prompt') { awaiting = { kind: 'dingque' }; renderActions(); return; }
   if (msg.type === 'your_turn') {
     awaiting = { kind: 'discard', legal: msg.legalDiscards || null };
     renderActions();

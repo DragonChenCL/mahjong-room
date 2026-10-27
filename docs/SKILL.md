@@ -35,7 +35,7 @@
 ## 2. 对局规则
 
 - 牌：108 张，万/条/筒各 36 张，无风牌、无花牌；开局每人 13 张，庄家（0 号座）14 张先出。
-- 定缺：开局每人先定缺一门花色；手里还有定缺花色时，只能出定缺花色；胡牌时手牌不能剩定缺花色。
+- 无定缺：开局不选缺门，任何花色都能出、都能胡；也没有风牌，只有万/条/筒。
 - 流程：轮到你摸牌后出牌；别人出牌后，按顺序问要不要牌，无人要则下家摸牌。
 - 碰/杠/胡：别人出牌时可碰（手里 2 张相同 + 这张）、杠（手里 3 张相同 + 这张）、胡；自己摸牌后可自摸胡、可杠。
 - 要牌顺序：先问能胡的人（离放炮者最近优先），再问能碰/杠的人；服务器发给你的 actions 就是当时能选的全部。
@@ -56,7 +56,6 @@
 | `state` | 公开局面 + 自己的手牌（见第 5 节） |
 | `authed` | 授权码绑定成功：附 `username` |
 | `auth_error` | 授权码无效（仍可作游客继续） |
-| `dingque_prompt` | 开局请定缺 |
 | `your_turn` | 轮到你出牌（附 `legalDiscards`：合法出牌列表） |
 | `draw_prompt` | 你摸牌后：附 `drawn`、`canWin`、`canKong` |
 | `claim_prompt` | 别人出牌后你可要牌：附 `tile`、`actions`（如 `["win","pong","pass"]`） |
@@ -71,7 +70,7 @@
   "type": "state", "you": 1, "phase": "playing", "turn": 2, "wallLeft": 64,
   "players": [
     { "name": "你", "kind": "human", "handCount": 13,
-      "melds": [], "discards": [7, 12], "dingque": 2, "won": false }
+      "melds": [], "discards": [7, 12], "won": false }
   ],
   "hand": [0, 1, 2, 9, 10],
   "lastDiscard": { "tile": 12, "from": 0 },
@@ -80,11 +79,11 @@
 ```
 
 - 别人的手牌只给张数，不给牌面；自己的手牌全量给。
-- `phase`：`waiting`（等开局）/ `dingque`（定缺中）/ `playing`（进行中）/ `over`（已结算）。
+- `phase`：`waiting`（等开局）/ `playing`（进行中）/ `over`（已结算）。
 
 ## 6. 你发给服务器的动作
 
-统一用 `action` 消息（`dingque` 除外见下）：
+统一用 `action` 消息：
 
 ```json
 { "type": "action", "action": "discard", "tile": 7 }
@@ -94,9 +93,8 @@
 { "type": "action", "action": "pass" }
 ```
 
-- 定缺：`{ "type": "action", "suit": 2 }`（0=万，1=条，2=筒）。
-- 出牌必须在合法列表里；定缺规则：手里还有定缺花色时，只能出定缺花色。
-- 胡牌判定：标准胡（4 组面子 + 1 对将）或七对子；胡牌时手牌不能剩定缺花色。
+- 出牌必须在合法列表里；无定缺，手里任何牌都能出。
+- 胡牌判定：标准胡（4 组面子 + 1 对将）或七对子。
 
 ## 7. 超时与兜底
 
@@ -113,15 +111,13 @@
 
 1. 能胡就胡，能杠就杠。
 2. 出牌优先打孤张（无对子、无相邻搭子）；其次拆边张。
-3. 定缺选手里最少的花色。
-4. 只从服务器给的合法动作里选，绝不自造动作。
+3. 只从服务器给的合法动作里选，绝不自造动作。
 
 ## 10. 最小接入示例（伪代码）
 
 ```
 连上 ws → 发 join(kind=agent)
 循环收消息：
-  dingque_prompt → 发 {type:action, suit: 手里最少的花色}
   your_turn → 发 {type:action, action:discard, tile: 孤张}
   draw_prompt → canWin 就发 win；canKong 就发 kong；否则 discard
   claim_prompt → actions 里有 win 就发 win；有 pong/kong 就发 pong/kong；否则 pass
