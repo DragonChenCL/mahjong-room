@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>棋牌室 · 麻将</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #1a1a1a; color: #eee; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+  header { display: flex; gap: 12px; align-items: center; padding: 12px 16px; background: #222; flex-wrap: wrap; }
+  header h1 { font-size: 18px; margin: 0; }
+  header .meta { color: #bbb; font-size: 13px; }
+  header input { padding: 6px 8px; border-radius: 6px; border: 1px solid #555; background: #333; color: #eee; }
+  button { padding: 8px 14px; border: 0; border-radius: 8px; background: #2e7d32; color: #fff; cursor: pointer; font-size: 14px; }
+  button:disabled { background: #555; cursor: default; }
+  button.warn { background: #b45309; }
+  button.ghost { background: #444; }
+  .wrap { display: flex; gap: 12px; padding: 12px; align-items: flex-start; }
+  .table { flex: 1; background: radial-gradient(circle at center, #2e7d32, #1b5e20 70%); border-radius: 16px; padding: 12px; display: grid; grid-template-columns: 1fr 2fr 1fr; grid-template-rows: auto 1fr auto; gap: 8px; min-height: 560px; }
+  .seat { background: rgba(0,0,0,.25); border-radius: 12px; padding: 8px; min-height: 110px; }
+  .seat.turn { outline: 2px solid #ffd54f; }
+  .seat-top { grid-column: 2; grid-row: 1; }
+  .seat-left { grid-column: 1; grid-row: 2; }
+  .seat-right { grid-column: 3; grid-row: 2; }
+  .seat-bottom { grid-column: 2; grid-row: 3; }
+  .center { grid-column: 2; grid-row: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
+  .seat-head { font-size: 13px; color: #ffe082; margin-bottom: 4px; }
+  .thought { font-size: 12px; color: #fff; background: rgba(0,0,0,.45); border-radius: 8px; padding: 4px 8px; margin-top: 6px; min-height: 22px; }
+  .tiles { display: flex; flex-wrap: wrap; gap: 3px; }
+  .tile { width: 30px; height: 42px; background: #fdfdf5; color: #222; border-radius: 5px; display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 2px 3px rgba(0,0,0,.4); font-weight: bold; }
+  .tile .r { font-size: 17px; line-height: 1; }
+  .tile .s { font-size: 11px; line-height: 1; }
+  .tile.back { background: #7b1fa2; }
+  .tile.small { width: 24px; height: 34px; }
+  .tile.small .r { font-size: 14px; }
+  .tile.small .s { font-size: 9px; }
+  .hand .tile { width: 42px; height: 58px; cursor: default; }
+  .hand .tile .r { font-size: 24px; }
+  .hand .tile .s { font-size: 13px; }
+  .hand .tile.playable { cursor: pointer; }
+  .hand .tile.playable:hover { transform: translateY(-8px); outline: 2px solid #ffd54f; }
+  .hand .tile.drawn { outline: 2px solid #ff7043; }
+  .suit-wan { color: #c62828; }
+  .suit-tiao { color: #2e7d32; }
+  .suit-tong { color: #1565c0; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; min-height: 38px; align-items: center; }
+  .hint { font-size: 13px; color: #ffe082; }
+  .side { width: 320px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px; }
+  .panel { background: #222; border-radius: 12px; padding: 10px; }
+  .panel h3 { margin: 0 0 8px; font-size: 14px; color: #ffe082; }
+  #log { max-height: 260px; overflow-y: auto; font-size: 13px; line-height: 1.7; color: #ddd; }
+  #agentState { max-height: 260px; overflow: auto; font-size: 11px; white-space: pre-wrap; word-break: break-all; color: #a5d6a7; margin: 0; }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.7); display: none; align-items: center; justify-content: center; }
+  .modal.show { display: flex; }
+  .modal .box { background: #222; border-radius: 16px; padding: 20px; max-width: 90vw; }
+  .rules { font-size: 12px; color: #bbb; padding: 0 16px 16px; line-height: 1.7; }
+  @media (max-width: 800px) {
+    .wrap { flex-direction: column; }
+    .side { width: 100%; }
+    .table { min-height: 0; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>棋牌室 · 麻将</h1>
+  <span class="meta" id="status">未连接</span>
+  <span class="meta" id="wall"></span>
+  <input id="name" value="你" maxlength="10">
+  <button id="quickStart">快速开始（你 + 3 机器人）</button>
+</header>
+
+<div class="wrap">
+  <div class="table">
+    <div class="seat seat-top" id="seat-top"></div>
+    <div class="seat seat-left" id="seat-left"></div>
+    <div class="center">
+      <div id="centerTile"></div>
+      <div class="hint" id="centerHint">点「快速开始」开一局</div>
+    </div>
+    <div class="seat seat-right" id="seat-right"></div>
+    <div class="seat seat-bottom" id="seat-bottom"></div>
+  </div>
+  <div class="side">
+    <div class="panel">
+      <h3>对局时间线</h3>
+      <div id="log"></div>
+    </div>
+    <div class="panel">
+      <h3>Agent 视角（服务器推送的状态）</h3>
+      <pre id="agentState">{}</pre>
+    </div>
+  </div>
+</div>
+
+<div class="rules">
+  v1 简化规则：108 张（万/条/筒），定缺，碰/杠/胡，胡牌即结算；未做换三张、血战、查叫、番数。
+  机器人为本地规则玩家，零 token；agent 通过 WebSocket 接口接入（见 docs/SKILL.md）。
+</div>
+
+<div class="modal" id="modal">
+  <div class="box">
+    <h2 id="modalTitle"></h2>
+    <div id="modalHands"></div>
+    <div style="margin-top:14px"><button id="again">再来一局</button></div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

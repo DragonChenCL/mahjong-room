@@ -1,0 +1,1 @@
+{"dependencies":{"ws":"^8.18.0"},"description":"Online mahjong room: humans, rule bots and AI agents play at the same table over WebSocket.","main":"server.js","name":"mahjong-room","scripts":{"start":"node server.js"},"version":"1.0.0"}

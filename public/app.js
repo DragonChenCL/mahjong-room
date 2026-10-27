@@ -1,0 +1,241 @@
+// 棋牌室麻将网页客户端 v1：与 server.js 的 WebSocket 协议对接。
+const SUITS = ['万', '条', '筒'];
+const SUIT_CLS = ['suit-wan', 'suit-tiao', 'suit-tong'];
+const tileName = (t) => `${(t % 9) + 1}${SUITS[Math.floor(t / 9)]}`;
+const suitOf = (t) => Math.floor(t / 9);
+
+let ws = null;
+let you = -1;
+let state = null;
+let awaiting = null; // {kind, actions?, canWin?, canKong?, legal?}
+let thoughts = {};
+let joined = false;
+
+const $ = (id) => document.getElementById(id);
+
+function connect() {
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(proto + '//' + location.host);
+  ws.onopen = () => { $('status').textContent = '已连接，点击快速开始'; };
+  ws.onclose = () => { $('status').textContent = '连接断开，请刷新页面'; };
+  ws.onmessage = (ev) => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch { return; }
+    onMessage(msg);
+  };
+}
+
+function send(obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+}
+
+function tileHTML(t, small) {
+  const rank = (t % 9) + 1;
+  const s = Math.floor(t / 9);
+  return `<div class="tile ${small ? 'small' : ''}"><span class="r ${SUIT_CLS[s]}">${rank}</span><span class="s ${SUIT_CLS[s]}">${SUITS[s]}</span></div>`;
+}
+function backHTML(small) {
+  return `<div class="tile back ${small ? 'small' : ''}"></div>`;
+}
+function meldHTML(m) {
+  const n = m.type === 'kong' ? 4 : 3;
+  let h = '';
+  for (let i = 0; i < n; i++) h += tileHTML(m.tile, true);
+  return h;
+}
+function legalSet() {
+  if (!state || you < 0) return new Set();
+  if (awaiting && awaiting.legal) return new Set(awaiting.legal);
+  const hand = state.hand;
+  const dq = state.players[you] ? state.players[you].dingque : null;
+  if (dq === null || dq === undefined) return new Set(hand);
+  const d = hand.filter((t) => suitOf(t) === dq);
+  return new Set(d.length ? d : hand);
+}
+
+function renderSeats() {
+  if (!state) return;
+  const order = you >= 0 ? [you, (you + 1) % 4, (you + 2) % 4, (you + 3) % 4] : [0, 1, 2, 3];
+  const pos = ['seat-bottom', 'seat-right', 'seat-top', 'seat-left'];
+  order.forEach((seatIdx, k) => {
+    const el = document.querySelector('.' + pos[k]);
+    const p = state.players[seatIdx];
+    if (!p) { el.innerHTML = '<div class="seat-head">空座位</div>'; el.classList.remove('turn'); return; }
+    const isMe = seatIdx === you;
+    const turnCls = state.turn === seatIdx && state.phase === 'playing' ? 'turn' : '';
+    el.className = 'seat ' + pos[k] + ' ' + turnCls;
+    let html = `<div class="seat-head">${p.name} ${p.kind === 'bot' ? '· 机器人' : p.kind === 'agent' ? '· Agent' : ''} ${p.dingque !== null && p.dingque !== undefined ? '· 缺' + SUITS[p.dingque] : ''}</div>`;
+    if (p.melds.length) html += `<div class="tiles">${p.melds.map(meldHTML).join('')}</div>`;
+    html += `<div class="tiles">${p.discards.map((t) => tileHTML(t, true)).join('')}</div>`;
+    if (isMe) {
+      const sorted = [...state.hand].sort((a, b) => a - b);
+      const legal = (awaiting && (awaiting.kind === 'discard' || awaiting.kind === 'draw_choice')) ? legalSet() : new Set();
+      const canClick = awaiting && (awaiting.kind === 'discard' || awaiting.kind === 'draw_choice');
+      html += `<div class="tiles hand">${sorted.map((t) => {
+        const ok = canClick && legal.has(t);
+        return `<div class="tile ${ok ? 'playable' : ''}" data-tile="${t}" onclick="onTileClick(${t})"><span class="r ${SUIT_CLS[Math.floor(t / 9)]}">${(t % 9) + 1}</span><span class="s ${SUIT_CLS[Math.floor(t / 9)]}">${SUITS[Math.floor(t / 9)]}</span></div>`;
+      }).join('')}</div>`;
+    } else {
+      let backs = '';
+      for (let i = 0; i < p.handCount; i++) backs += backHTML(true);
+      html += `<div class="tiles">${backs}</div>`;
+    }
+    if (thoughts[seatIdx]) html += `<div class="thought">💭 ${thoughts[seatIdx]}</div>`;
+    el.innerHTML = html;
+  });
+  // 中央：最后一张弃牌
+  const c = $('centerTile');
+  if (state.lastDiscard) {
+    const from = state.players[state.lastDiscard.from];
+    c.innerHTML = tileHTML(state.lastDiscard.tile, false) + `<div class="hint">${from ? from.name : ''} 打出</div>`;
+  } else {
+    c.innerHTML = '';
+  }
+  $('wall').textContent = `牌墙剩 ${state.wallLeft} 张`;
+  const phaseText = { waiting: '等待开始', dingque: '定缺中', playing: '进行中', over: '已结算' }[state.phase] || state.phase;
+  const turnName = state.phase === 'playing' && state.players[state.turn] ? ` · 轮到 ${state.players[state.turn].name}` : '';
+  $('centerHint').textContent = phaseText + turnName;
+  // Agent 视角
+  const summary = {
+    turn: state.turn,
+    wallLeft: state.wallLeft,
+    lastDiscard: state.lastDiscard,
+    players: state.players.map((p) => p ? { name: p.name, kind: p.kind, handCount: p.handCount, melds: p.melds, discards: p.discards, dingque: p.dingque } : null),
+    hand: state.hand,
+  };
+  $('agentState').textContent = JSON.stringify(summary, null, 1);
+}
+
+function renderActions() {
+  const bar = document.createElement('div');
+  const bottom = document.querySelector('.seat-bottom');
+  const old = bottom.querySelector('.actions');
+  if (old) old.remove();
+  const div = document.createElement('div');
+  div.className = 'actions';
+  if (!awaiting) {
+    if (state && state.phase === 'playing') div.innerHTML = '<span class="hint">等待其他玩家…</span>';
+  } else if (awaiting.kind === 'dingque') {
+    div.innerHTML = '<span class="hint">请选择定缺：</span>' +
+      [0, 1, 2].map((s) => `<button onclick="sendDingque(${s})">缺${SUITS[s]}</button>`).join('');
+  } else if (awaiting.kind === 'draw_choice') {
+    if (awaiting.canWin) div.innerHTML += '<button onclick="sendDrawChoice(\'win\')">胡</button>';
+    if (awaiting.canKong) div.innerHTML += '<button onclick="sendDrawChoice(\'kong\')">杠</button>';
+    div.innerHTML += '<span class="hint">或点击手牌出牌</span>';
+  } else if (awaiting.kind === 'discard') {
+    div.innerHTML = '<span class="hint">轮到你出牌，点击手牌</span>';
+  } else if (awaiting.kind === 'claim') {
+    const label = { win: '胡', pong: '碰', kong: '杠', pass: '过' };
+    div.innerHTML = awaiting.actions.map((a) => `<button onclick="sendClaim('${a}')">${label[a]}</button>`).join('');
+  }
+  bottom.appendChild(div);
+}
+
+function render() {
+  renderSeats();
+  renderActions();
+}
+
+function onTileClick(t) {
+  if (!awaiting || (awaiting.kind !== 'discard' && awaiting.kind !== 'draw_choice')) return;
+  if (!legalSet().has(t)) return;
+  if (awaiting.kind === 'discard') send({ type: 'discard', tile: t });
+  else send({ type: 'draw_choice', action: 'discard', tile: t });
+  awaiting = null;
+  renderActions();
+}
+function sendDingque(suit) {
+  send({ type: 'dingque', suit });
+  awaiting = null;
+  renderActions();
+}
+function sendDrawChoice(action) {
+  send({ type: 'draw_choice', action });
+  awaiting = null;
+  renderActions();
+}
+function sendClaim(action) {
+  send({ type: 'claim', action });
+  awaiting = null;
+  renderActions();
+}
+function appendLog(text) {
+  const el = $('log');
+  const div = document.createElement('div');
+  div.textContent = text;
+  el.appendChild(div);
+  while (el.children.length > 100) el.removeChild(el.firstChild);
+  el.scrollTop = el.scrollHeight;
+}
+
+function onMessage(msg) {
+  if (msg.type === 'joined') {
+    you = msg.seat;
+    joined = true;
+    $('status').textContent = '已加入牌桌';
+    return;
+  }
+  if (msg.type === 'state') {
+    state = msg;
+    if (msg.phase === 'over') awaiting = null;
+    render();
+    return;
+  }
+  if (msg.type === 'dingque_prompt') { awaiting = { kind: 'dingque' }; renderActions(); return; }
+  if (msg.type === 'your_turn') {
+    awaiting = { kind: 'discard', legal: msg.legalDiscards || null };
+    renderActions();
+    return;
+  }
+  if (msg.type === 'draw_prompt') {
+    awaiting = { kind: 'draw_choice', canWin: !!msg.canWin, canKong: !!msg.canKong };
+    renderActions();
+    return;
+  }
+  if (msg.type === 'claim_prompt') {
+    awaiting = { kind: 'claim', actions: msg.actions };
+    renderActions();
+    return;
+  }
+  if (msg.type === 'thought') {
+    thoughts[msg.seat] = msg.text;
+    renderSeats();
+    return;
+  }
+  if (msg.type === 'log') { appendLog(msg.text); return; }
+  if (msg.type === 'gameover') {
+    awaiting = null;
+    const title = msg.winner === null ? '流局' : `${msg.winnerName} ${msg.winKind === 'zimo' ? '自摸' : '胡牌'}！`;
+    $('modalTitle').textContent = title;
+    let h = '';
+    if (state) {
+      state.players.forEach((p, i) => {
+        if (!p) return;
+        const hand = msg.hands && msg.hands[i] ? [...msg.hands[i]].sort((a, b) => a - b) : [];
+        h += `<div style="margin:6px 0"><b>${p.name}</b> <span class="tiles" style="display:inline-flex">${hand.map((t) => tileHTML(t, true)).join('')}</span></div>`;
+      });
+    }
+    $('modalHands').innerHTML = h;
+    $('modal').classList.add('show');
+    return;
+  }
+}
+
+$('quickStart').onclick = () => {
+  if (!ws || ws.readyState !== WebSocket.OPEN) { connect(); setTimeout(doStart, 300); }
+  else doStart();
+};
+function doStart() {
+  if (joined) { send({ type: 'start' }); return; }
+  const name = $('name').value.trim() || '你';
+  send({ type: 'join', name, kind: 'human' });
+  setTimeout(() => send({ type: 'start' }), 200);
+  $('quickStart').disabled = true;
+  $('quickStart').textContent = '已开局';
+}
+$('again').onclick = () => {
+  $('modal').classList.remove('show');
+  send({ type: 'restart' });
+};
+
+connect();
