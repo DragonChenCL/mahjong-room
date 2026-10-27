@@ -634,11 +634,14 @@ wss.on('connection', (ws) => {
       if (seat >= 0) table.log(`${table.seats[seat].name} 加入牌桌`);
       return;
     }
+    if (msg.type === 'logout') { ws.user = null; return; }
     if (msg.type === 'start') {
+      if (!ws.user) { table.send(ws, { type: 'error', message: '请先登录再开局' }); return; }
       if (table.phase === 'waiting') table.start().catch((e) => console.error('start error', e));
       return;
     }
     if (msg.type === 'restart') {
+      if (!ws.user) { table.send(ws, { type: 'error', message: '请先登录再开局' }); return; }
       if (table.phase === 'over') {
         const keep = table.seats.map((s) => s);
         table.reset();

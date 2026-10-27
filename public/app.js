@@ -176,6 +176,11 @@ function onMessage(msg) {
     showAuthForm('授权码已失效，请重新登录');
     return;
   }
+  if (msg.type === 'error') {
+    $('status').textContent = msg.message || '操作失败';
+    appendLog(msg.message || '操作失败');
+    return;
+  }
   if (msg.type === 'joined') {
     you = msg.seat;
     joined = true;
@@ -232,15 +237,16 @@ $('quickStart').onclick = () => {
   else doStart();
 };
 function doStart() {
+  if (!authCode) { openAuthMenu(); $('status').textContent = '请先登录再开局'; return; }
   if (joined) { send({ type: 'start' }); return; }
-  const name = $('name').value.trim() || '你';
-  send({ type: 'join', name, kind: 'human', authCode: authCode || undefined });
+  send({ type: 'join', name: authUser, kind: 'human', authCode });
   setTimeout(() => send({ type: 'start' }), 200);
   $('quickStart').disabled = true;
   $('quickStart').textContent = '已开局';
 }
 $('again').onclick = () => {
   $('modal').classList.remove('show');
+  if (!authCode) { openAuthMenu(); $('status').textContent = '请先登录再开局'; return; }
   send({ type: 'restart' });
 };
 
@@ -250,7 +256,7 @@ connect();
 function showAuthForm(msg) {
   $('authForm').classList.remove('hidden');
   $('authInfo').classList.add('hidden');
-  $('authStatus').textContent = '未登录';
+  $('authToggle').textContent = '登录 / 注册';
   if (msg !== undefined) { $('authMsg').textContent = msg; $('authMsg').classList.remove('ok'); }
 }
 function showAuthInfo() {
@@ -258,9 +264,7 @@ function showAuthInfo() {
   $('authInfo').classList.remove('hidden');
   $('authName').textContent = authUser;
   $('authCode').value = authCode;
-  $('authStatus').textContent = '已登录：' + authUser;
-  const nameInput = $('name');
-  if (nameInput && (nameInput.value.trim() === '你' || !nameInput.value.trim())) nameInput.value = authUser;
+  $('authToggle').textContent = authUser;
 }
 function sendAuthIfReady() {
   if (authCode) send({ type: 'auth', code: authCode });
@@ -283,6 +287,7 @@ async function doAuth(path) {
 $('btnRegister').onclick = () => doAuth('/api/register');
 $('btnLogin').onclick = () => doAuth('/api/login');
 $('btnLogout').onclick = () => {
+  send({ type: 'logout' });
   authCode = ''; authUser = '';
   localStorage.removeItem('mahjong-auth-code');
   localStorage.removeItem('mahjong-username');
@@ -308,6 +313,12 @@ $('btnRotateCode').onclick = async () => {
   $('authInfoMsg').textContent = '授权码已更换，旧的立即失效';
   $('authInfoMsg').classList.add('ok');
 };
+function openAuthMenu() { $('authMenu').classList.remove('hidden'); }
+$('authToggle').onclick = (ev) => { ev.stopPropagation(); $('authMenu').classList.toggle('hidden'); };
+document.addEventListener('click', (ev) => {
+  const wrap = $('authWrap');
+  if (wrap && !wrap.contains(ev.target)) $('authMenu').classList.add('hidden');
+});
 // 页面加载时校验已存授权码
 (async () => {
   if (!authCode) { showAuthForm(); return; }

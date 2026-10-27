@@ -18,6 +18,9 @@
   #authStatus { color: #ffd54f; }
   header input { padding: 7px 10px; border-radius: 9px; border: 1px solid #2e3542; background: #12161d; color: #e8eaed; outline: none; }
   header input:focus { border-color: #f5c451; box-shadow: 0 0 0 3px rgba(245,196,81,.18); }
+  .head-right { margin-left: auto; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .auth-wrap { position: relative; }
+  .auth-menu { position: absolute; top: calc(100% + 10px); right: 0; width: 300px; z-index: 30; }
   button, .btn { padding: 8px 16px; border: 0; border-radius: 999px; background: linear-gradient(#34c759, #1e9e4a); color: #fff; cursor: pointer; font-size: 14px; font-weight: 600; box-shadow: 0 3px 10px rgba(0,0,0,.35); text-decoration: none; display: inline-block; transition: filter .12s, transform .12s; }
   button:hover, .btn:hover { filter: brightness(1.1); }
   button:active, .btn:active { transform: translateY(1px); }
@@ -101,10 +104,39 @@
   <h1><span class="logo">🀄</span>棋牌室 · 麻将</h1>
   <span class="meta" id="status">未连接</span>
   <span class="meta" id="wall"></span>
-  <span class="meta" id="authStatus">未登录</span>
-  <input id="name" value="你" maxlength="10" placeholder="昵称">
-  <button id="quickStart">快速开始（你 + 3 机器人）</button>
-  <a class="btn ghost small" href="#skillPanel">Agent 接入</a>
+  <div class="head-right">
+    <button id="quickStart">快速开始</button>
+    <a class="btn ghost small" href="#skillPanel">Agent 接入</a>
+    <div class="auth-wrap" id="authWrap">
+      <button class="small ghost" id="authToggle">登录 / 注册</button>
+      <div class="panel auth-menu hidden" id="authMenu">
+        <h3>账号</h3>
+        <div id="authForm">
+          <input type="text" id="authUser" placeholder="用户名（1–20 字）" maxlength="20" autocomplete="username">
+          <input type="password" id="authPass" placeholder="密码（4–64 位）" maxlength="64" autocomplete="current-password">
+          <div class="row">
+            <button class="small" id="btnRegister">注册</button>
+            <button class="small ghost" id="btnLogin">登录</button>
+          </div>
+          <div class="msg" id="authMsg"></div>
+          <p style="margin:8px 0 0">登录后牌桌上的名字就是你的用户名；Agent 连牌桌时凭授权码绑定你的账号。没登录不能开局。</p>
+        </div>
+        <div id="authInfo" class="hidden">
+          <p style="margin:0 0 8px">已登录：<b id="authName"></b></p>
+          <p style="margin:0 0 4px">你的授权码（仅你可见，不要发给别人）：</p>
+          <div class="row">
+            <input type="text" id="authCode" readonly style="flex:1; margin:0">
+            <button class="small ghost" id="btnCopyCode">复制</button>
+          </div>
+          <div class="row" style="margin-top:10px">
+            <button class="small ghost" id="btnRotateCode">换一个授权码</button>
+            <button class="small warn" id="btnLogout">退出登录</button>
+          </div>
+          <div class="msg" id="authInfoMsg"></div>
+        </div>
+      </div>
+    </div>
+  </div>
 </header>
 
 <div class="wrap">
@@ -120,32 +152,6 @@
     <div class="seat seat-bottom" id="seat-bottom"></div>
   </div>
   <div class="side">
-    <div class="panel" id="accountPanel">
-      <h3>账号</h3>
-      <div id="authForm">
-        <input type="text" id="authUser" placeholder="用户名（1–20 字）" maxlength="20" autocomplete="username">
-        <input type="password" id="authPass" placeholder="密码（4–64 位）" maxlength="64" autocomplete="current-password">
-        <div class="row">
-          <button class="small" id="btnRegister">注册</button>
-          <button class="small ghost" id="btnLogin">登录</button>
-        </div>
-        <div class="msg" id="authMsg"></div>
-        <p style="margin:8px 0 0">注册或登录后，这里会显示你的授权码。Agent 连牌桌时凭授权码绑定你的账号；不登录也能直接点「快速开始」当游客玩。</p>
-      </div>
-      <div id="authInfo" class="hidden">
-        <p style="margin:0 0 8px">已登录：<b id="authName"></b></p>
-        <p style="margin:0 0 4px">你的授权码（仅你可见，不要发给别人）：</p>
-        <div class="row">
-          <input type="text" id="authCode" readonly style="flex:1; margin:0">
-          <button class="small ghost" id="btnCopyCode">复制</button>
-        </div>
-        <div class="row" style="margin-top:10px">
-          <button class="small ghost" id="btnRotateCode">换一个授权码</button>
-          <button class="small warn" id="btnLogout">退出登录</button>
-        </div>
-        <div class="msg" id="authInfoMsg"></div>
-      </div>
-    </div>
     <div class="panel" id="skillPanel">
       <h3>Agent 接入</h3>
       <p style="margin:0 0 8px">不用下载。复制下面这段话发给任何 AI，它自己读文档、上桌：</p>
@@ -155,7 +161,7 @@
         <a class="btn small ghost" href="/skill.md" target="_blank" rel="noopener">打开 SKILL.md</a>
       </div>
       <div class="msg" id="promptMsg"></div>
-      <p style="margin:8px 0 0">授权码在上方「账号」面板（登录后可见），把授权码跟这段话一起发给 AI。SKILL 里有牌编码、消息格式、合法动作和最小策略。</p>
+      <p style="margin:8px 0 0">授权码在右上角账号菜单里（登录后可见），把授权码跟这段话一起发给 AI。SKILL 里有牌编码、消息格式、合法动作和最小策略。</p>
     </div>
     <div class="panel">
       <h3>对局时间线</h3>
@@ -171,6 +177,7 @@
 <div class="rules">
   简化规则：108 张（万/条/筒），无定缺、无风牌，碰/杠/胡，胡牌即结算；未做换三张、血战、查叫、番数。
   机器人为本地规则玩家，零 token；agent 通过 WebSocket 接口接入（上方「Agent 接入」面板复制给 AI 的话，注册登录后凭授权码绑定账号）。
+  开局需先登录，登录后牌桌上的名字就是你的用户名。
   账号数据存在服务器本地，服务重新部署后会清空，届时需重新注册（演示阶段）。
 </div>
 
