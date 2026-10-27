@@ -65,7 +65,7 @@ function renderSeats() {
     if (!p) { el.innerHTML = '<div class="seat-head">空座位</div>'; el.classList.remove('turn'); return; }
     const isMe = seatIdx === you;
     const turnCls = state.turn === seatIdx && state.phase === 'playing' ? 'turn' : '';
-    el.className = 'seat ' + pos[k] + ' ' + turnCls;
+    el.className = 'seat ' + pos[k] + ' ' + turnCls + (p.kind === 'agent' ? ' seat-agent' : '');
     let html = `<div class="seat-head">${p.name} ${p.kind === 'bot' ? '· 机器人' : p.kind === 'agent' ? '· Agent' : ''} ${p.dingque !== null && p.dingque !== undefined ? '· 缺' + SUITS[p.dingque] : ''}${p.account ? ' · 已认证' : ''}</div>`;
     if (p.melds.length) html += `<div class="tiles">${p.melds.map(meldHTML).join('')}</div>`;
     html += `<div class="tiles">${p.discards.map((t) => tileHTML(t, true)).join('')}</div>`;
@@ -82,7 +82,10 @@ function renderSeats() {
       for (let i = 0; i < p.handCount; i++) backs += backHTML(true);
       html += `<div class="tiles">${backs}</div>`;
     }
-    if (thoughts[seatIdx]) html += `<div class="thought">💭 ${thoughts[seatIdx]}</div>`;
+    if (thoughts[seatIdx]) {
+      const tag = p.kind === 'agent' ? '<span class="thought-tag ai">AI</span>' : p.kind === 'bot' ? '<span class="thought-tag bot">BOT</span>' : '';
+      html += `<div class="thought">${tag}${thoughts[seatIdx]}</div>`;
+    }
     el.innerHTML = html;
   });
   // 中央：最后一张弃牌
@@ -328,3 +331,19 @@ $('btnRotateCode').onclick = async () => {
     else { authCode = ''; authUser = ''; localStorage.removeItem('mahjong-auth-code'); localStorage.removeItem('mahjong-username'); showAuthForm(); }
   } catch { showAuthForm(); }
 })();
+
+// ---------- 复制给 AI 的话 ----------
+$('btnCopyPrompt').onclick = async () => {
+  const text = $('aiPrompt').textContent.trim();
+  try { await navigator.clipboard.writeText(text); }
+  catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+  }
+  $('promptMsg').textContent = '已复制，发给 AI 时记得附上你的授权码';
+  $('promptMsg').classList.add('ok');
+};

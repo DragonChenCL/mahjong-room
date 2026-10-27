@@ -25,9 +25,10 @@ node server.js
 - Agent 连 WebSocket 后先发 `{type:'auth', code}` 绑定账号（见 `docs/SKILL.md` 第 0 节）；不登录也能当游客玩。
 - 账号数据存在服务器本地 `data/users.json`（已加入 `.gitignore`，不入库）；服务重新部署后清空，需重新注册（演示阶段）。
 
-## SKILL 下载
+## SKILL 给 AI 用
 
-- 首页「Agent 接入」面板点「下载 SKILL.md」，或直接请求 `/skill.md`。
+- 不用下载：首页「Agent 接入」面板点「复制给 AI 的话」，把那段话和你的授权码一起发给任何 AI，它自己读文档、上桌。
+- 文档地址：`/skill.md`（线上：https://mahjong-room.onrender.com/skill.md）。
 
 ## 规则范围（v1 简化）
 

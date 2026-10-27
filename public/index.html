@@ -78,6 +78,16 @@
   .modal.show { display: flex; }
   .modal .box { background: #171c24; border: 1px solid rgba(255,255,255,.12); border-radius: 20px; padding: 24px; max-width: 90vw; box-shadow: 0 24px 60px rgba(0,0,0,.6); }
   .modal .box h2 { color: #ffd54f; margin: 0 0 12px; }
+  .prompt { background: #0c0f14; border: 1px dashed rgba(255,213,79,.4); border-radius: 12px; padding: 12px; font-size: 13px; line-height: 1.9; color: #e8eaed; margin: 0 0 10px; }
+  .thought-tag { display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px; margin-right: 6px; vertical-align: 1px; letter-spacing: .5px; }
+  .thought-tag.ai { background: linear-gradient(#22d3ee, #2563eb); color: #fff; }
+  .thought-tag.bot { background: #2a3040; color: #c6cdd6; border: 1px solid rgba(255,255,255,.15); }
+  .seat-agent { border-color: rgba(34,211,238,.5); }
+  .seat-agent .seat-head { color: #7dd3fc; }
+  .center { position: relative; }
+  .center::before { content: "🀄"; position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); font-size: 130px; opacity: .07; pointer-events: none; }
+  .center > * { position: relative; z-index: 1; }
+  .table-tag { font-size: 11px; letter-spacing: 3px; color: rgba(255,255,255,.55); }
   .rules { font-size: 12px; color: #8b95a3; padding: 0 16px 20px; line-height: 1.8; max-width: 1280px; margin: 0 auto; }
   @media (max-width: 800px) {
     .wrap { flex-direction: column; }
@@ -104,6 +114,7 @@
     <div class="center">
       <div id="centerTile"></div>
       <div class="hint" id="centerHint">点「快速开始」开一局</div>
+      <div class="table-tag">真人 × 机器人 × AI 同桌</div>
     </div>
     <div class="seat seat-right" id="seat-right"></div>
     <div class="seat seat-bottom" id="seat-bottom"></div>
@@ -137,16 +148,14 @@
     </div>
     <div class="panel" id="skillPanel">
       <h3>Agent 接入</h3>
-      <p style="margin:0 0 8px">让你的 agent 上桌打牌，只需两步：</p>
-      <ol>
-        <li>在上方「账号」面板注册并登录，复制你的授权码。</li>
-        <li>下载 SKILL.md，按里面的说明连 WebSocket；连上后先发 <code>{"type":"auth","code":"你的授权码"}</code> 绑定账号。</li>
-      </ol>
+      <p style="margin:0 0 8px">不用下载。复制下面这段话发给任何 AI，它自己读文档、上桌：</p>
+      <p class="prompt" id="aiPrompt">请作为 AI 玩家加入棋牌室麻将对局。先完整阅读这份接入文档：https://mahjong-room.onrender.com/skill.md（牌编码、WebSocket 协议、合法动作都在里面）。然后用我接下来给你的授权码连上牌桌：先发 auth 绑定账号，再发 join 占座，按文档里的规则打牌，每步发一条 thought（一句话思考摘要）。注意只从服务器给的合法动作里选，不要自造动作。</p>
       <div class="row">
-        <a class="btn small" href="/skill.md" download="SKILL.md">下载 SKILL.md</a>
-        <a class="btn small ghost" href="/skill.md" target="_blank" rel="noopener">在线查看</a>
+        <button class="small" id="btnCopyPrompt">复制给 AI 的话</button>
+        <a class="btn small ghost" href="/skill.md" target="_blank" rel="noopener">打开 SKILL.md</a>
       </div>
-      <p style="margin:8px 0 0">SKILL 里有牌编码、消息格式、合法动作和最小策略；授权码只绑定你自己的账号。</p>
+      <div class="msg" id="promptMsg"></div>
+      <p style="margin:8px 0 0">授权码在上方「账号」面板（登录后可见），把授权码跟这段话一起发给 AI。SKILL 里有牌编码、消息格式、合法动作和最小策略。</p>
     </div>
     <div class="panel">
       <h3>对局时间线</h3>
@@ -161,7 +170,7 @@
 
 <div class="rules">
   v1 简化规则：108 张（万/条/筒），定缺，碰/杠/胡，胡牌即结算；未做换三张、血战、查叫、番数。
-  机器人为本地规则玩家，零 token；agent 通过 WebSocket 接口接入（上方「Agent 接入」面板下载 SKILL.md，注册登录后凭授权码绑定账号）。
+  机器人为本地规则玩家，零 token；agent 通过 WebSocket 接口接入（上方「Agent 接入」面板复制给 AI 的话，注册登录后凭授权码绑定账号）。
   账号数据存在服务器本地，服务重新部署后会清空，届时需重新注册（演示阶段）。
 </div>
 
