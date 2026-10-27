@@ -682,7 +682,9 @@ wss.on('connection', (ws) => {
     if (msg.type === 'restart') {
       if (!ws.user) { table.send(ws, { type: 'error', message: '请先登录再开局' }); return; }
       if (table.phase === 'over') {
-        const keep = table.seats.map((s) => s);
+        // 只保留真人/AI 座位：机器人座位（含掉线转机器人代打的座位）一律释放，
+        // 否则机器人占满座位后无人能加入、也无人能开局，桌子永久卡死。
+        const keep = table.seats.map((s) => (s && s.kind !== 'bot' ? s : null));
         table.reset();
         keep.forEach((s, i) => { if (s) table.seats[i] = s; });
         table.phase = 'waiting';
