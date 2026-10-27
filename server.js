@@ -7,6 +7,7 @@ const http = require('http');
 const fs = require('fs');
 const path = require('path');
 const WebSocket = require('ws');
+const crypto = require('crypto');
 
 const PORT = process.env.PORT || 3000;
 const SUITS = ['万', '条', '筒'];
@@ -17,6 +18,36 @@ const CLAIM_TIMEOUT_MS = 15000;
 const tileName = (t) => `${(t % 9) + 1}${SUITS[Math.floor(t / 9)]}`;
 const suitOf = (t) => Math.floor(t / 9);
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// ---------- 账号与授权码（演示阶段：存服务器本地 data/users.json） ----------
+const DATA_DIR = path.join(__dirname, 'data');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
+// users: username -> { salt, hash, code, createdAt }（密码只存 scrypt 哈希，不存明文）
+const users = new Map();
+function loadUsers() {
+  try {
+    const obj = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
+    for (const [name, u] of Object.entries(obj)) {
+      if (u && typeof u.salt === 'string' && typeof u.hash === 'string' && typeof u.code === 'string') users.set(name, u);
+    }
+  } catch { /* 无文件或损坏：从空开始 */ }
+}
+function saveUsers() {
+  try {
+    fs.mkdirSync(DATA_DIR, { recursive: true });
+    fs.writeFileSync(USERS_FILE, JSON.stringify(Object.fromEntries(users), null, 1), 'utf8');
+  } catch (e) { console.error('save users failed', e.message); }
+}
+function hashPassword(password, salt) {
+  return crypto.scryptSync(password, salt, 64).toString('hex');
+}
+function newAuthCode() { return crypto.randomBytes(16).toString('hex'); }
+function findUserByCode(code) {
+  if (typeof code !== 'string' || !code) return null;
+  for (const [name, u] of users) if (u.code === code) return name;
+  return null;
+}
+loadUsers();
 
 // ---------- 规则引擎 ----------
 function countsOf(tiles) {
@@ -123,6 +154,7 @@ class Table {
     const players = this.seats.map((s) => s ? {
       name: s.name, kind: s.kind, handCount: s.hand.length,
       melds: s.melds, discards: s.discards, dingque: s.dingque, won: s.won,
+      account: s.account || null,
     } : null);
     return {
       type: 'state',
@@ -200,6 +232,7 @@ class Table {
     if (idx < 0) { this.spectators.add(ws); this.send(ws, this.stateFor(-1)); return -1; }
     this.seats[idx] = {
       kind, name: name || (kind === 'human' ? '你' : 'Agent'),
+      account: ws.user || null,
       ws, hand: [], melds: [], discards: [], dingque: null, won: false,
     };
     this.send(ws, { type: 'joined', seat: idx });
@@ -512,12 +545,97 @@ class Table {
   }
 }
 
+// ---------- 账号 API ----------
+function sendJson(res, status, obj) {
+  res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify(obj));
+}
+function readJsonBody(req, limit = 10240) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > limit) { req.destroy(); reject(new Error('body too large')); }
+    });
+    req.on('end', () => {
+      try { resolve(body ? JSON.parse(body) : {}); } catch { reject(new Error('bad json')); }
+    });
+    req.on('error', reject);
+  });
+}
+function validUsername(name) {
+  return typeof name === 'string' && name.trim().length >= 1 && name.trim().length <= 20;
+}
+function validPassword(pw) {
+  return typeof pw === 'string' && pw.length >= 4 && pw.length <= 64;
+}
+async function handleApi(req, res) {
+  const url = new URL(req.url, 'http://localhost');
+  const p = url.pathname;
+  try {
+    if (req.method === 'POST' && p === '/api/register') {
+      const body = await readJsonBody(req);
+      const username = typeof body.username === 'string' ? body.username.trim() : '';
+      if (!validUsername(username) || !validPassword(body.password)) {
+        return sendJson(res, 400, { ok: false, error: '用户名 1–20 字，密码 4–64 位' });
+      }
+      if (users.has(username)) return sendJson(res, 409, { ok: false, error: '用户名已被注册' });
+      const salt = crypto.randomBytes(16).toString('hex');
+      users.set(username, { salt, hash: hashPassword(body.password, salt), code: newAuthCode(), createdAt: Date.now() });
+      saveUsers();
+      return sendJson(res, 200, { ok: true, username, code: users.get(username).code });
+    }
+    if (req.method === 'POST' && p === '/api/login') {
+      const body = await readJsonBody(req);
+      const username = typeof body.username === 'string' ? body.username.trim() : '';
+      const u = users.get(username);
+      let ok = false;
+      if (u) {
+        try { ok = crypto.timingSafeEqual(Buffer.from(u.hash, 'hex'), Buffer.from(hashPassword(body.password || '', u.salt), 'hex')); } catch { ok = false; }
+      }
+      if (!ok) return sendJson(res, 401, { ok: false, error: '用户名或密码不对' });
+      return sendJson(res, 200, { ok: true, username, code: u.code });
+    }
+    if (req.method === 'GET' && p === '/api/me') {
+      const username = findUserByCode(url.searchParams.get('code'));
+      if (!username) return sendJson(res, 401, { ok: false, error: '授权码无效' });
+      return sendJson(res, 200, { ok: true, username });
+    }
+    if (req.method === 'POST' && p === '/api/rotate') {
+      const body = await readJsonBody(req);
+      const username = findUserByCode(body.code);
+      if (!username) return sendJson(res, 401, { ok: false, error: '授权码无效' });
+      users.get(username).code = newAuthCode();
+      saveUsers();
+      return sendJson(res, 200, { ok: true, username, code: users.get(username).code });
+    }
+    return sendJson(res, 404, { ok: false, error: 'not found' });
+  } catch (e) {
+    if (e.message === 'body too large' || e.message === 'bad json') return sendJson(res, 400, { ok: false, error: '请求格式不对' });
+    throw e;
+  }
+}
+
 // ---------- HTTP + WebSocket ----------
 const table = new Table();
 const MIME = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css', '.json': 'application/json' };
 
 const server = http.createServer((req, res) => {
   if (req.url === '/health') { res.writeHead(200); res.end('ok'); return; }
+  // SKILL 下载：首页「Agent 接入」面板的下载/在线查看入口
+  if (req.url.split('?')[0] === '/skill.md') {
+    fs.readFile(path.join(__dirname, 'docs', 'SKILL.md'), (err, data) => {
+      if (err) { res.writeHead(404); res.end('not found'); return; }
+      res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8' });
+      res.end(data);
+    });
+    return;
+  }
+  // 账号 API：注册 / 登录 / 校验 / 换授权码
+  if (req.url.split('?')[0].startsWith('/api/')) {
+    handleApi(req, res).catch(() => { if (!res.headersSent) sendJson(res, 500, { ok: false, error: 'server error' }); });
+    return;
+  }
   let file = req.url === '/' ? '/index.html' : req.url.split('?')[0];
   const full = path.normalize(path.join(__dirname, 'public', file));
   if (!full.startsWith(path.join(__dirname, 'public'))) { res.writeHead(403); res.end(); return; }
@@ -533,9 +651,17 @@ wss.on('connection', (ws) => {
   ws.on('message', (raw) => {
     let msg;
     try { msg = JSON.parse(raw); } catch { return; }
+    if (msg.type === 'auth') {
+      const username = findUserByCode(msg.code);
+      if (username) { ws.user = username; table.send(ws, { type: 'authed', username }); }
+      else table.send(ws, { type: 'auth_error', message: '授权码无效' });
+      return;
+    }
     if (msg.type === 'join') {
       if (table.seatOf(ws) >= 0) return;
-      const seat = table.addPlayer(ws, msg.name, msg.kind === 'agent' ? 'agent' : 'human');
+      const authUser = findUserByCode(msg.authCode || msg.code);
+      if (authUser) ws.user = authUser;
+      const seat = table.addPlayer(ws, msg.name || ws.user, msg.kind === 'agent' ? 'agent' : 'human');
       if (seat >= 0) table.log(`${table.seats[seat].name} 加入牌桌`);
       return;
     }

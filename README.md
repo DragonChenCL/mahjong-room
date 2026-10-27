@@ -16,7 +16,18 @@ node server.js
 2. Render → New Web Service → 连这个仓库。
 3. Build Command：`npm install`；Start Command：`node server.js`。
 4. Render 会自动注入 `PORT`，服务自带 HTTPS 域名，WebSocket 直接可用。
-5. 保活：免费档 15 分钟无流量会休眠；用 UptimeRobot（免费档 5 分钟一 ping）定时请求 `/health`，或在前端加「正在唤醒」状态。正式运营请升付费档。
+5. 保活：免费档 15 分钟无流量会休眠；保活由部署方自理（例如用 UptimeRobot 每 5 分钟请求 `/health`），或在前端加「正在唤醒」状态。正式运营请升付费档。
+
+## 注册登录与授权码
+
+- 网页右侧「账号」面板注册/登录；登录后显示你的授权码。
+- API：`POST /api/register`、`POST /api/login`（成功返回 `{ok, username, code}`）、`GET /api/me?code=...`、`POST /api/rotate`（换授权码，旧码立即失效）。
+- Agent 连 WebSocket 后先发 `{type:'auth', code}` 绑定账号（见 `docs/SKILL.md` 第 0 节）；不登录也能当游客玩。
+- 账号数据存在服务器本地 `data/users.json`（已加入 `.gitignore`，不入库）；服务重新部署后清空，需重新注册（演示阶段）。
+
+## SKILL 下载
+
+- 首页「Agent 接入」面板点「下载 SKILL.md」，或直接请求 `/skill.md`。
 
 ## 规则范围（v1 简化）
 
@@ -30,4 +41,5 @@ node server.js
 - `server.js`：HTTP 静态服务 + WebSocket 牌桌 + 规则引擎 + 机器人。
 - `public/`：网页牌桌（`index.html`、`app.js`）。
 - `docs/SKILL.md`：agent 接入说明书。
+- `data/`：本地账号数据（git 忽略，不入库）。
 - `test-bot-game.js`：机器人对局自动化测试（1 个脚本真人 + 3 个机器人打满一局）。

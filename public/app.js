@@ -10,13 +10,15 @@ let state = null;
 let awaiting = null; // {kind, actions?, canWin?, canKong?, legal?}
 let thoughts = {};
 let joined = false;
+let authCode = localStorage.getItem('mahjong-auth-code') || '';
+let authUser = localStorage.getItem('mahjong-username') || '';
 
 const $ = (id) => document.getElementById(id);
 
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(proto + '//' + location.host);
-  ws.onopen = () => { $('status').textContent = '已连接，点击快速开始'; };
+  ws.onopen = () => { $('status').textContent = '已连接，点击快速开始'; if (authCode) send({ type: 'auth', code: authCode }); };
   ws.onclose = () => { $('status').textContent = '连接断开，请刷新页面'; };
   ws.onmessage = (ev) => {
     let msg;
@@ -64,7 +66,7 @@ function renderSeats() {
     const isMe = seatIdx === you;
     const turnCls = state.turn === seatIdx && state.phase === 'playing' ? 'turn' : '';
     el.className = 'seat ' + pos[k] + ' ' + turnCls;
-    let html = `<div class="seat-head">${p.name} ${p.kind === 'bot' ? '· 机器人' : p.kind === 'agent' ? '· Agent' : ''} ${p.dingque !== null && p.dingque !== undefined ? '· 缺' + SUITS[p.dingque] : ''}</div>`;
+    let html = `<div class="seat-head">${p.name} ${p.kind === 'bot' ? '· 机器人' : p.kind === 'agent' ? '· Agent' : ''} ${p.dingque !== null && p.dingque !== undefined ? '· 缺' + SUITS[p.dingque] : ''}${p.account ? ' · 已认证' : ''}</div>`;
     if (p.melds.length) html += `<div class="tiles">${p.melds.map(meldHTML).join('')}</div>`;
     html += `<div class="tiles">${p.discards.map((t) => tileHTML(t, true)).join('')}</div>`;
     if (isMe) {
@@ -162,13 +164,27 @@ function sendClaim(action) {
 function appendLog(text) {
   const el = $('log');
   const div = document.createElement('div');
-  div.textContent = text;
+  div.textContent = `[${new Date().toLocaleTimeString('zh-CN', { hour12: false })}] ${text}`;
   el.appendChild(div);
   while (el.children.length > 100) el.removeChild(el.firstChild);
   el.scrollTop = el.scrollHeight;
 }
 
 function onMessage(msg) {
+  if (msg.type === 'authed') {
+    authUser = msg.username;
+    localStorage.setItem('mahjong-username', authUser);
+    showAuthInfo();
+    return;
+  }
+  if (msg.type === 'auth_error') {
+    authCode = '';
+    authUser = '';
+    localStorage.removeItem('mahjong-auth-code');
+    localStorage.removeItem('mahjong-username');
+    showAuthForm('授权码已失效，请重新登录');
+    return;
+  }
   if (msg.type === 'joined') {
     you = msg.seat;
     joined = true;
@@ -228,7 +244,7 @@ $('quickStart').onclick = () => {
 function doStart() {
   if (joined) { send({ type: 'start' }); return; }
   const name = $('name').value.trim() || '你';
-  send({ type: 'join', name, kind: 'human' });
+  send({ type: 'join', name, kind: 'human', authCode: authCode || undefined });
   setTimeout(() => send({ type: 'start' }), 200);
   $('quickStart').disabled = true;
   $('quickStart').textContent = '已开局';
@@ -239,3 +255,76 @@ $('again').onclick = () => {
 };
 
 connect();
+
+// ---------- 账号面板 ----------
+function showAuthForm(msg) {
+  $('authForm').classList.remove('hidden');
+  $('authInfo').classList.add('hidden');
+  $('authStatus').textContent = '未登录';
+  if (msg !== undefined) { $('authMsg').textContent = msg; $('authMsg').classList.remove('ok'); }
+}
+function showAuthInfo() {
+  $('authForm').classList.add('hidden');
+  $('authInfo').classList.remove('hidden');
+  $('authName').textContent = authUser;
+  $('authCode').value = authCode;
+  $('authStatus').textContent = '已登录：' + authUser;
+  const nameInput = $('name');
+  if (nameInput && (nameInput.value.trim() === '你' || !nameInput.value.trim())) nameInput.value = authUser;
+}
+function sendAuthIfReady() {
+  if (authCode) send({ type: 'auth', code: authCode });
+}
+async function authPost(path, body) {
+  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  return { status: r.status, data: await r.json().catch(() => ({})) };
+}
+async function doAuth(path) {
+  const username = $('authUser').value.trim();
+  const password = $('authPass').value;
+  const { data } = await authPost(path, { username, password });
+  if (!data.ok) { $('authMsg').textContent = data.error || '失败'; $('authMsg').classList.remove('ok'); return; }
+  authUser = data.username; authCode = data.code;
+  localStorage.setItem('mahjong-username', authUser);
+  localStorage.setItem('mahjong-auth-code', authCode);
+  sendAuthIfReady();
+  showAuthInfo();
+}
+$('btnRegister').onclick = () => doAuth('/api/register');
+$('btnLogin').onclick = () => doAuth('/api/login');
+$('btnLogout').onclick = () => {
+  authCode = ''; authUser = '';
+  localStorage.removeItem('mahjong-auth-code');
+  localStorage.removeItem('mahjong-username');
+  showAuthForm('已退出登录');
+};
+$('btnCopyCode').onclick = async () => {
+  const code = $('authCode').value;
+  try { await navigator.clipboard.writeText(code); }
+  catch {
+    $('authCode').select();
+    document.execCommand('copy');
+  }
+  $('authInfoMsg').textContent = '已复制';
+  $('authInfoMsg').classList.add('ok');
+};
+$('btnRotateCode').onclick = async () => {
+  const { data } = await authPost('/api/rotate', { code: authCode });
+  if (!data.ok) { $('authInfoMsg').textContent = data.error || '更换失败'; $('authInfoMsg').classList.remove('ok'); return; }
+  authCode = data.code;
+  localStorage.setItem('mahjong-auth-code', authCode);
+  $('authCode').value = authCode;
+  sendAuthIfReady();
+  $('authInfoMsg').textContent = '授权码已更换，旧的立即失效';
+  $('authInfoMsg').classList.add('ok');
+};
+// 页面加载时校验已存授权码
+(async () => {
+  if (!authCode) { showAuthForm(); return; }
+  try {
+    const r = await fetch('/api/me?code=' + encodeURIComponent(authCode));
+    const data = await r.json();
+    if (data.ok) { authUser = data.username; localStorage.setItem('mahjong-username', authUser); showAuthInfo(); }
+    else { authCode = ''; authUser = ''; localStorage.removeItem('mahjong-auth-code'); localStorage.removeItem('mahjong-username'); showAuthForm(); }
+  } catch { showAuthForm(); }
+})();

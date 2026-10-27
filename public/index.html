@@ -4,56 +4,81 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>棋牌室 · 麻将</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🀄</text></svg>">
 <style>
   * { box-sizing: border-box; }
-  body { margin: 0; background: #1a1a1a; color: #eee; font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
-  header { display: flex; gap: 12px; align-items: center; padding: 12px 16px; background: #222; flex-wrap: wrap; }
-  header h1 { font-size: 18px; margin: 0; }
-  header .meta { color: #bbb; font-size: 13px; }
-  header input { padding: 6px 8px; border-radius: 6px; border: 1px solid #555; background: #333; color: #eee; }
-  button { padding: 8px 14px; border: 0; border-radius: 8px; background: #2e7d32; color: #fff; cursor: pointer; font-size: 14px; }
-  button:disabled { background: #555; cursor: default; }
-  button.warn { background: #b45309; }
-  button.ghost { background: #444; }
-  .wrap { display: flex; gap: 12px; padding: 12px; align-items: flex-start; }
-  .table { flex: 1; background: radial-gradient(circle at center, #2e7d32, #1b5e20 70%); border-radius: 16px; padding: 12px; display: grid; grid-template-columns: 1fr 2fr 1fr; grid-template-rows: auto 1fr auto; gap: 8px; min-height: 560px; }
-  .seat { background: rgba(0,0,0,.25); border-radius: 12px; padding: 8px; min-height: 110px; }
-  .seat.turn { outline: 2px solid #ffd54f; }
+  html { background: #0e1116; }
+  body { margin: 0; background: radial-gradient(1200px 600px at 50% -10%, #1c2530 0%, #0e1116 55%); color: #e8eaed; font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; min-height: 100vh; }
+  a { color: #ffd54f; }
+  header { position: sticky; top: 0; z-index: 10; display: flex; gap: 12px; align-items: center; padding: 10px 16px; background: rgba(17, 21, 28, .92); border-bottom: 1px solid rgba(255,255,255,.08); backdrop-filter: blur(8px); flex-wrap: wrap; }
+  header h1 { font-size: 19px; margin: 0; display: flex; align-items: center; gap: 9px; letter-spacing: .5px; }
+  .logo { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 9px; background: linear-gradient(#fff8dc, #f5d76e); box-shadow: 0 2px 8px rgba(0,0,0,.5); font-size: 20px; }
+  header .meta { color: #9aa5b1; font-size: 13px; }
+  #status { background: rgba(255,255,255,.07); border: 1px solid rgba(255,255,255,.1); border-radius: 999px; padding: 4px 10px; }
+  #authStatus { color: #ffd54f; }
+  header input { padding: 7px 10px; border-radius: 9px; border: 1px solid #2e3542; background: #12161d; color: #e8eaed; outline: none; }
+  header input:focus { border-color: #f5c451; box-shadow: 0 0 0 3px rgba(245,196,81,.18); }
+  button, .btn { padding: 8px 16px; border: 0; border-radius: 999px; background: linear-gradient(#34c759, #1e9e4a); color: #fff; cursor: pointer; font-size: 14px; font-weight: 600; box-shadow: 0 3px 10px rgba(0,0,0,.35); text-decoration: none; display: inline-block; transition: filter .12s, transform .12s; }
+  button:hover, .btn:hover { filter: brightness(1.1); }
+  button:active, .btn:active { transform: translateY(1px); }
+  button:disabled { background: #3a414d; cursor: default; box-shadow: none; }
+  button.warn { background: linear-gradient(#f59e0b, #b45309); }
+  button.ghost, .btn.ghost { background: #242b38; border: 1px solid rgba(255,255,255,.12); box-shadow: none; }
+  button.small, .btn.small { padding: 6px 12px; font-size: 13px; }
+  .wrap { display: flex; gap: 14px; padding: 14px; align-items: flex-start; max-width: 1280px; margin: 0 auto; }
+  .table { flex: 1; background: radial-gradient(ellipse at center, #3aa655 0%, #2a7d44 45%, #1c5c31 78%, #14482a 100%); border: 7px solid #6b4423; outline: 1px solid rgba(255,215,130,.35); outline-offset: -1px; border-radius: 22px; padding: 14px; display: grid; grid-template-columns: 1fr 2fr 1fr; grid-template-rows: auto 1fr auto; gap: 10px; min-height: 580px; box-shadow: 0 24px 50px rgba(0,0,0,.5), inset 0 0 70px rgba(0,0,0,.35); }
+  .seat { background: rgba(0,0,0,.28); border: 1px solid rgba(255,255,255,.09); border-radius: 14px; padding: 10px; min-height: 118px; }
+  .seat.turn { box-shadow: 0 0 0 2px #ffd54f, 0 0 20px rgba(255,213,79,.45); }
   .seat-top { grid-column: 2; grid-row: 1; }
   .seat-left { grid-column: 1; grid-row: 2; }
   .seat-right { grid-column: 3; grid-row: 2; }
   .seat-bottom { grid-column: 2; grid-row: 3; }
-  .center { grid-column: 2; grid-row: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
-  .seat-head { font-size: 13px; color: #ffe082; margin-bottom: 4px; }
-  .thought { font-size: 12px; color: #fff; background: rgba(0,0,0,.45); border-radius: 8px; padding: 4px 8px; margin-top: 6px; min-height: 22px; }
+  .center { grid-column: 2; grid-row: 2; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; }
+  .center .tile { width: 46px; height: 64px; }
+  .center .tile .r { font-size: 26px; }
+  .center .tile .s { font-size: 14px; }
+  .seat-head { font-size: 13px; font-weight: 700; color: #ffe082; margin-bottom: 6px; letter-spacing: .3px; }
+  .thought { font-size: 12px; line-height: 1.5; color: #fff; background: rgba(0,0,0,.5); border: 1px solid rgba(255,255,255,.1); border-radius: 10px; padding: 6px 10px; margin-top: 8px; min-height: 22px; }
   .tiles { display: flex; flex-wrap: wrap; gap: 3px; }
-  .tile { width: 30px; height: 42px; background: #fdfdf5; color: #222; border-radius: 5px; display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 2px 3px rgba(0,0,0,.4); font-weight: bold; }
+  .tile { width: 30px; height: 42px; background: linear-gradient(#fffef8, #f5ecd4); color: #222; border: 1px solid #d9cfae; border-radius: 6px; display: flex; flex-direction: column; align-items: center; justify-content: center; box-shadow: 0 3px 0 #cbbf9a, 0 4px 8px rgba(0,0,0,.35); font-weight: bold; }
   .tile .r { font-size: 17px; line-height: 1; }
-  .tile .s { font-size: 11px; line-height: 1; }
-  .tile.back { background: #7b1fa2; }
-  .tile.small { width: 24px; height: 34px; }
+  .tile .s { font-size: 11px; line-height: 1.1; }
+  .tile.back { background-color: #3b2d8f; background-image: repeating-linear-gradient(45deg, rgba(255,255,255,.1) 0 6px, transparent 6px 12px); border-color: #2a2168; box-shadow: 0 3px 0 #241b5e, 0 4px 8px rgba(0,0,0,.35); }
+  .tile.small { width: 24px; height: 34px; box-shadow: 0 2px 0 #cbbf9a, 0 3px 6px rgba(0,0,0,.35); }
   .tile.small .r { font-size: 14px; }
   .tile.small .s { font-size: 9px; }
-  .hand .tile { width: 42px; height: 58px; cursor: default; }
+  .hand .tile { width: 42px; height: 58px; cursor: default; transition: transform .12s, box-shadow .12s; }
   .hand .tile .r { font-size: 24px; }
   .hand .tile .s { font-size: 13px; }
   .hand .tile.playable { cursor: pointer; }
-  .hand .tile.playable:hover { transform: translateY(-8px); outline: 2px solid #ffd54f; }
+  .hand .tile.playable:hover { transform: translateY(-8px); outline: 2px solid #ffd54f; box-shadow: 0 8px 0 #cbbf9a, 0 10px 16px rgba(0,0,0,.45); }
   .hand .tile.drawn { outline: 2px solid #ff7043; }
-  .suit-wan { color: #c62828; }
-  .suit-tiao { color: #2e7d32; }
-  .suit-tong { color: #1565c0; }
-  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; min-height: 38px; align-items: center; }
+  .suit-wan { color: #dc2626; }
+  .suit-tiao { color: #15803d; }
+  .suit-tong { color: #1d4ed8; }
+  .actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; min-height: 38px; align-items: center; }
   .hint { font-size: 13px; color: #ffe082; }
-  .side { width: 320px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px; }
-  .panel { background: #222; border-radius: 12px; padding: 10px; }
-  .panel h3 { margin: 0 0 8px; font-size: 14px; color: #ffe082; }
-  #log { max-height: 260px; overflow-y: auto; font-size: 13px; line-height: 1.7; color: #ddd; }
-  #agentState { max-height: 260px; overflow: auto; font-size: 11px; white-space: pre-wrap; word-break: break-all; color: #a5d6a7; margin: 0; }
-  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.7); display: none; align-items: center; justify-content: center; }
+  #centerHint { background: rgba(0,0,0,.45); border: 1px solid rgba(255,255,255,.12); border-radius: 999px; padding: 6px 14px; }
+  .side { width: 330px; flex-shrink: 0; display: flex; flex-direction: column; gap: 14px; }
+  .panel { background: #171c24; border: 1px solid rgba(255,255,255,.08); border-radius: 16px; padding: 14px; box-shadow: 0 10px 24px rgba(0,0,0,.3); }
+  .panel h3 { margin: 0 0 10px; font-size: 14px; color: #ffd54f; letter-spacing: .4px; }
+  .panel p, .panel li { font-size: 13px; line-height: 1.8; color: #c6cdd6; }
+  .panel ol, .panel ul { margin: 6px 0; padding-left: 20px; }
+  .panel code { background: rgba(255,255,255,.08); border-radius: 5px; padding: 1px 6px; font-size: 12px; color: #a5d6a7; word-break: break-all; }
+  .panel input[type="text"], .panel input[type="password"] { width: 100%; padding: 8px 10px; margin: 4px 0 8px; border-radius: 9px; border: 1px solid #2e3542; background: #12161d; color: #e8eaed; outline: none; }
+  .panel input:focus { border-color: #f5c451; box-shadow: 0 0 0 3px rgba(245,196,81,.18); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .msg { font-size: 13px; color: #ffb74d; min-height: 20px; margin-top: 6px; }
+  .msg.ok { color: #81c784; }
+  .hidden { display: none !important; }
+  #log { max-height: 260px; overflow-y: auto; font-size: 13px; line-height: 1.8; color: #ddd; }
+  #log div { border-bottom: 1px solid rgba(255,255,255,.05); padding: 2px 0; }
+  #agentState { max-height: 260px; overflow: auto; font-size: 11px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; color: #a5d6a7; margin: 0; background: #0c0f14; border-radius: 10px; padding: 10px; }
+  .modal { position: fixed; inset: 0; background: rgba(0,0,0,.7); backdrop-filter: blur(3px); display: none; align-items: center; justify-content: center; z-index: 20; }
   .modal.show { display: flex; }
-  .modal .box { background: #222; border-radius: 16px; padding: 20px; max-width: 90vw; }
-  .rules { font-size: 12px; color: #bbb; padding: 0 16px 16px; line-height: 1.7; }
+  .modal .box { background: #171c24; border: 1px solid rgba(255,255,255,.12); border-radius: 20px; padding: 24px; max-width: 90vw; box-shadow: 0 24px 60px rgba(0,0,0,.6); }
+  .modal .box h2 { color: #ffd54f; margin: 0 0 12px; }
+  .rules { font-size: 12px; color: #8b95a3; padding: 0 16px 20px; line-height: 1.8; max-width: 1280px; margin: 0 auto; }
   @media (max-width: 800px) {
     .wrap { flex-direction: column; }
     .side { width: 100%; }
@@ -63,11 +88,13 @@
 </head>
 <body>
 <header>
-  <h1>棋牌室 · 麻将</h1>
+  <h1><span class="logo">🀄</span>棋牌室 · 麻将</h1>
   <span class="meta" id="status">未连接</span>
   <span class="meta" id="wall"></span>
-  <input id="name" value="你" maxlength="10">
+  <span class="meta" id="authStatus">未登录</span>
+  <input id="name" value="你" maxlength="10" placeholder="昵称">
   <button id="quickStart">快速开始（你 + 3 机器人）</button>
+  <a class="btn ghost small" href="#skillPanel">Agent 接入</a>
 </header>
 
 <div class="wrap">
@@ -82,6 +109,45 @@
     <div class="seat seat-bottom" id="seat-bottom"></div>
   </div>
   <div class="side">
+    <div class="panel" id="accountPanel">
+      <h3>账号</h3>
+      <div id="authForm">
+        <input type="text" id="authUser" placeholder="用户名（1–20 字）" maxlength="20" autocomplete="username">
+        <input type="password" id="authPass" placeholder="密码（4–64 位）" maxlength="64" autocomplete="current-password">
+        <div class="row">
+          <button class="small" id="btnRegister">注册</button>
+          <button class="small ghost" id="btnLogin">登录</button>
+        </div>
+        <div class="msg" id="authMsg"></div>
+        <p style="margin:8px 0 0">注册或登录后，这里会显示你的授权码。Agent 连牌桌时凭授权码绑定你的账号；不登录也能直接点「快速开始」当游客玩。</p>
+      </div>
+      <div id="authInfo" class="hidden">
+        <p style="margin:0 0 8px">已登录：<b id="authName"></b></p>
+        <p style="margin:0 0 4px">你的授权码（仅你可见，不要发给别人）：</p>
+        <div class="row">
+          <input type="text" id="authCode" readonly style="flex:1; margin:0">
+          <button class="small ghost" id="btnCopyCode">复制</button>
+        </div>
+        <div class="row" style="margin-top:10px">
+          <button class="small ghost" id="btnRotateCode">换一个授权码</button>
+          <button class="small warn" id="btnLogout">退出登录</button>
+        </div>
+        <div class="msg" id="authInfoMsg"></div>
+      </div>
+    </div>
+    <div class="panel" id="skillPanel">
+      <h3>Agent 接入</h3>
+      <p style="margin:0 0 8px">让你的 agent 上桌打牌，只需两步：</p>
+      <ol>
+        <li>在上方「账号」面板注册并登录，复制你的授权码。</li>
+        <li>下载 SKILL.md，按里面的说明连 WebSocket；连上后先发 <code>{"type":"auth","code":"你的授权码"}</code> 绑定账号。</li>
+      </ol>
+      <div class="row">
+        <a class="btn small" href="/skill.md" download="SKILL.md">下载 SKILL.md</a>
+        <a class="btn small ghost" href="/skill.md" target="_blank" rel="noopener">在线查看</a>
+      </div>
+      <p style="margin:8px 0 0">SKILL 里有牌编码、消息格式、合法动作和最小策略；授权码只绑定你自己的账号。</p>
+    </div>
     <div class="panel">
       <h3>对局时间线</h3>
       <div id="log"></div>
@@ -95,7 +161,8 @@
 
 <div class="rules">
   v1 简化规则：108 张（万/条/筒），定缺，碰/杠/胡，胡牌即结算；未做换三张、血战、查叫、番数。
-  机器人为本地规则玩家，零 token；agent 通过 WebSocket 接口接入（见 docs/SKILL.md）。
+  机器人为本地规则玩家，零 token；agent 通过 WebSocket 接口接入（上方「Agent 接入」面板下载 SKILL.md，注册登录后凭授权码绑定账号）。
+  账号数据存在服务器本地，服务重新部署后会清空，届时需重新注册（演示阶段）。
 </div>
 
 <div class="modal" id="modal">
