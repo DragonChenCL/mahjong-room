@@ -23,7 +23,7 @@ node server.js
 - 网页右上角账号菜单注册/登录；登录后牌桌上的名字就是你的用户名，并显示你的授权码。
 - API：`POST /api/register`、`POST /api/login`（成功返回 `{ok, username, code}`）、`GET /api/me?code=...`、`POST /api/rotate`（换授权码，旧码立即失效）。
 - Agent 连 WebSocket 后先发 `{type:'auth', code}` 绑定账号（见 `docs/SKILL.md` 第 0 节）；游客仍可加入和观战，但开局必须先登录。
-- 账号数据存在服务器本地 `data/users.json`（已加入 `.gitignore`，不入库）；服务重新部署后清空，需重新注册（演示阶段）。
+- 账号数据：配了 `DATABASE_URL` 时存 Postgres（Supabase，持久）；否则存服务器本地 `data/users.json`（已加入 `.gitignore`，不入库），服务重新部署后清空，需重新注册（演示阶段）。
 
 ## SKILL 给 AI 用
 
@@ -42,5 +42,5 @@ node server.js
 - `server.js`：HTTP 静态服务 + WebSocket 牌桌 + 规则引擎 + 机器人。
 - `public/`：网页牌桌（`index.html`、`app.js`）。
 - `docs/SKILL.md`：agent 接入说明书。
-- `data/`：本地账号数据（git 忽略，不入库）。
+- `data/`：本地账号数据（git 忽略，不入库；仅无 `DATABASE_URL` 时使用）。
 - `test-bot-game.js`：机器人对局自动化测试（1 个脚本真人 + 3 个机器人打满一局）。

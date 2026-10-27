@@ -19,12 +19,16 @@ const tileName = (t) => `${(t % 9) + 1}${SUITS[Math.floor(t / 9)]}`;
 const suitOf = (t) => Math.floor(t / 9);
 const delay = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// ---------- 账号与授权码（演示阶段：存服务器本地 data/users.json） ----------
+// ---------- 账号与授权码 ----------
+// 优先 Postgres（DATABASE_URL 环境变量，如 Supabase）；无则回落服务器本地 data/users.json。
+// 两种后端共用内存 Map；DB 模式下每次 save 全量 upsert（用户量小，简单可靠）。
 const DATA_DIR = path.join(__dirname, 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
 // users: username -> { salt, hash, code, createdAt }（密码只存 scrypt 哈希，不存明文）
 const users = new Map();
-function loadUsers() {
+let dbPool = null;
+let storeKind = 'json'; // 'json' | 'db'
+function loadUsersFromJson() {
   try {
     const obj = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
     for (const [name, u] of Object.entries(obj)) {
@@ -32,7 +36,43 @@ function loadUsers() {
     }
   } catch { /* 无文件或损坏：从空开始 */ }
 }
-function saveUsers() {
+async function initStore() {
+  const url = process.env.DATABASE_URL;
+  if (!url) { loadUsersFromJson(); console.log('[store] 账号存储：本地 JSON'); return; }
+  try {
+    const { Pool } = require('pg');
+    dbPool = new Pool({ connectionString: url, ssl: { rejectUnauthorized: false } });
+    await dbPool.query(`CREATE TABLE IF NOT EXISTS users (
+      username TEXT PRIMARY KEY,
+      salt TEXT NOT NULL,
+      hash TEXT NOT NULL,
+      code TEXT NOT NULL UNIQUE,
+      created_at BIGINT NOT NULL DEFAULT 0
+    )`);
+    const r = await dbPool.query('SELECT username, salt, hash, code, created_at FROM users');
+    for (const row of r.rows) {
+      users.set(row.username, { salt: row.salt, hash: row.hash, code: row.code, createdAt: row.created_at });
+    }
+    storeKind = 'db';
+    console.log('[store] 账号存储：Postgres');
+  } catch (e) {
+    console.error('[store] 数据库连接失败，回落本地 JSON：', e.message);
+    dbPool = null;
+    loadUsersFromJson();
+  }
+}
+async function saveUsers() {
+  if (storeKind === 'db' && dbPool) {
+    try {
+      for (const [name, u] of users) {
+        await dbPool.query(
+          'INSERT INTO users (username, salt, hash, code, created_at) VALUES ($1,$2,$3,$4,$5) ' +
+          'ON CONFLICT (username) DO UPDATE SET salt = EXCLUDED.salt, hash = EXCLUDED.hash, code = EXCLUDED.code',
+          [name, u.salt, u.hash, u.code, u.createdAt || 0]);
+      }
+    } catch (e) { console.error('save users to db failed', e.message); }
+    return;
+  }
   try {
     fs.mkdirSync(DATA_DIR, { recursive: true });
     fs.writeFileSync(USERS_FILE, JSON.stringify(Object.fromEntries(users), null, 1), 'utf8');
@@ -47,7 +87,6 @@ function findUserByCode(code) {
   for (const [name, u] of users) if (u.code === code) return name;
   return null;
 }
-loadUsers();
 
 // ---------- 规则引擎 ----------
 function countsOf(tiles) {
@@ -252,8 +291,8 @@ class Table {
 
   async start() {
     if (this.phase !== 'waiting') return;
-    const humans = this.seats.filter((s) => s && s.kind === 'human').length;
-    if (humans === 0) return;
+    const real = this.seats.filter((s) => s && s.kind !== 'bot').length;
+    if (real === 0) { this.log('开局失败：桌上没有真人或 AI 玩家'); return; }
     let botIdx = 0;
     for (let i = 0; i < 4; i++) {
       if (!this.seats[i]) {
@@ -551,7 +590,7 @@ async function handleApi(req, res) {
       if (users.has(username)) return sendJson(res, 409, { ok: false, error: '用户名已被注册' });
       const salt = crypto.randomBytes(16).toString('hex');
       users.set(username, { salt, hash: hashPassword(body.password, salt), code: newAuthCode(), createdAt: Date.now() });
-      saveUsers();
+      await saveUsers();
       return sendJson(res, 200, { ok: true, username, code: users.get(username).code });
     }
     if (req.method === 'POST' && p === '/api/login') {
@@ -575,7 +614,7 @@ async function handleApi(req, res) {
       const username = findUserByCode(body.code);
       if (!username) return sendJson(res, 401, { ok: false, error: '授权码无效' });
       users.get(username).code = newAuthCode();
-      saveUsers();
+      await saveUsers();
       return sendJson(res, 200, { ok: true, username, code: users.get(username).code });
     }
     return sendJson(res, 404, { ok: false, error: 'not found' });
@@ -678,6 +717,8 @@ wss.on('connection', (ws) => {
 });
 
 if (require.main === module) {
-  server.listen(PORT, () => console.log(`mahjong-room listening on ${PORT}`));
+  initStore().then(() => {
+    server.listen(PORT, () => console.log(`mahjong-room listening on ${PORT} (store: ${storeKind})`));
+  });
 }
 module.exports = { canHu, countsOf, legalDiscards, botChooseDiscard, tileName };
