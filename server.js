@@ -773,7 +773,9 @@ const server = http.createServer((req, res) => {
     handleApi(req, res).catch(() => { if (!res.headersSent) sendJson(res, 500, { ok: false, error: 'server error' }); });
     return;
   }
-  let file = req.url === '/' ? '/index.html' : req.url.split('?')[0];
+  // 根路径要先去掉查询串再比对：/?table=xxx 否则会被当成文件 '/' 读目录而 404
+  const pathOnly = req.url.split('?')[0];
+  let file = pathOnly === '/' ? '/index.html' : pathOnly;
   const full = path.normalize(path.join(__dirname, 'public', file));
   if (!full.startsWith(path.join(__dirname, 'public'))) { res.writeHead(403); res.end(); return; }
   fs.readFile(full, (err, data) => {
