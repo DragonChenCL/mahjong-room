@@ -12,7 +12,7 @@ const crypto = require('crypto');
 const PORT = process.env.PORT || 3000;
 const SUITS = ['万', '条', '筒'];
 const BOT_NAMES = ['阿强', '阿珍', '阿伟'];
-const HUMAN_TIMEOUT_MS = 30000; // agent/真人单步超时：超时自动过牌或打安全牌
+const HUMAN_TIMEOUT_MS = 60000; // agent/真人单步超时 60 秒：超时自动过牌或打安全牌
 const CLAIM_TIMEOUT_MS = 15000;
 
 const tileName = (t) => `${(t % 9) + 1}${SUITS[Math.floor(t / 9)]}`;
