@@ -142,10 +142,37 @@ function renderActions() {
   bottom.appendChild(div);
 }
 
+function renderCreatorPanel() {
+  const panel = $('creatorPanel');
+  if (!state || !authUser || state.creator !== authUser || state.tableId === 'main') {
+    panel.classList.add('hidden');
+    return;
+  }
+  panel.classList.remove('hidden');
+  let html = '';
+  state.players.forEach((p, i) => {
+    if (!p || p.kind === 'bot') return;
+    const isMe = i === you;
+    const safeName = p.name.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    html += `<div class="row" style="margin:4px 0"><span style="font-size:13px">${safeName}${p.kind === 'agent' ? ' · Agent' : ''}${isMe ? '（你）' : ''}</span>${isMe ? '' : `<button class="small ghost" onclick="sendKick(${i})">踢出</button>`}</div>`;
+  });
+  if (!html) html = '<p style="margin:0">本桌暂无其他真人或 AI 玩家</p>';
+  $('creatorSeats').innerHTML = html;
+}
+
 function render() {
   renderSeats();
   renderActions();
+  renderCreatorPanel();
 }
+
+function sendKick(seat) {
+  send({ type: 'kick', seat });
+}
+$('btnDissolve').onclick = () => {
+  if (!confirm('确定解散本桌吗？所有人都会离开。')) return;
+  send({ type: 'dissolve' });
+};
 
 function onTileClick(t) {
   if (!awaiting || (awaiting.kind !== 'discard' && awaiting.kind !== 'draw_choice')) return;
@@ -165,6 +192,41 @@ function sendClaim(action) {
   awaiting = null;
   renderActions();
 }
+function appendChat(name, text) {
+  const el = $('chatList');
+  const div = document.createElement('div');
+  const b = document.createElement('b');
+  b.textContent = name;
+  div.appendChild(b);
+  div.appendChild(document.createTextNode('：' + text));
+  el.appendChild(div);
+  while (el.children.length > 100) el.removeChild(el.firstChild);
+  el.scrollTop = el.scrollHeight;
+}
+function sendChat() {
+  const input = $('chatInput');
+  const text = input.value.trim();
+  if (!text) return;
+  if (!authCode) { $('chatMsg').textContent = '请先登录再发言'; $('chatMsg').classList.remove('ok'); return; }
+  send({ type: 'chat', text: text.slice(0, 200) });
+  input.value = '';
+}
+$('btnChatSend').onclick = sendChat;
+$('chatInput').addEventListener('keydown', (ev) => { if (ev.key === 'Enter') sendChat(); });
+function updateChatInput() {
+  const input = $('chatInput');
+  input.disabled = !authCode;
+  input.placeholder = authCode ? '发言（200 字内）' : '登录后可发言';
+}
+async function refreshPoints() {
+  if (!authCode) return;
+  try {
+    const r = await fetch('/api/me?code=' + encodeURIComponent(authCode));
+    const data = await r.json();
+    if (data.ok && typeof data.points === 'number') $('authPoints').textContent = data.points;
+  } catch {}
+}
+
 function appendLog(text) {
   const el = $('log');
   const div = document.createElement('div');
@@ -192,6 +254,20 @@ function onMessage(msg) {
   if (msg.type === 'error') {
     $('status').textContent = msg.message || '操作失败';
     appendLog(msg.message || '操作失败');
+    return;
+  }
+  if (msg.type === 'chat') { appendChat(msg.name || '未知', msg.text || ''); return; }
+  if (msg.type === 'kicked') {
+    $('status').innerHTML = '你已被桌主请出本桌，<a href="/lobby.html">去大厅</a>';
+    appendLog('你已被桌主请出本桌');
+    return;
+  }
+  if (msg.type === 'table_dissolved') {
+    $('status').innerHTML = '牌桌已被桌主解散，<a href="/lobby.html">去大厅</a>';
+    appendLog('牌桌已被桌主解散');
+    state = null;
+    awaiting = null;
+    render();
     return;
   }
   if (msg.type === 'joined') {
@@ -237,6 +313,9 @@ function onMessage(msg) {
     awaiting = null;
     const title = msg.winner === null ? '流局' : `${msg.winnerName} ${msg.winKind === 'zimo' ? '自摸' : '胡牌'}！`;
     $('modalTitle').textContent = title;
+    $('modalPoints').textContent = (msg.winnerPoints !== null && msg.winnerPoints !== undefined)
+      ? `${msg.winnerName} +${msg.pointsDelta} 分（总分 ${msg.winnerPoints}）`
+      : '';
     let h = '';
     if (state) {
       state.players.forEach((p, i) => {
@@ -247,6 +326,7 @@ function onMessage(msg) {
     }
     $('modalHands').innerHTML = h;
     $('modal').classList.add('show');
+    refreshPoints();
     return;
   }
 }
@@ -265,6 +345,7 @@ function doStart() {
 }
 $('again').onclick = () => {
   $('modal').classList.remove('show');
+  $('modalPoints').textContent = '';
   if (!authCode) { openAuthMenu(); $('status').textContent = '请先登录再开局'; return; }
   send({ type: 'restart' });
 };
@@ -277,6 +358,8 @@ function showAuthForm(msg) {
   $('authInfo').classList.add('hidden');
   $('authToggle').textContent = '登录 / 注册';
   if (msg !== undefined) { $('authMsg').textContent = msg; $('authMsg').classList.remove('ok'); }
+  updateChatInput();
+  renderCreatorPanel();
 }
 function showAuthInfo() {
   $('authForm').classList.add('hidden');
@@ -284,6 +367,9 @@ function showAuthInfo() {
   $('authName').textContent = authUser;
   $('authCode').value = authCode;
   $('authToggle').textContent = authUser;
+  updateChatInput();
+  refreshPoints();
+  renderCreatorPanel();
 }
 function sendAuthIfReady() {
   if (authCode) send({ type: 'auth', code: authCode });

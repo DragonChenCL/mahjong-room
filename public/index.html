@@ -76,6 +76,9 @@
   .hidden { display: none !important; }
   #log { max-height: 260px; overflow-y: auto; font-size: 13px; line-height: 1.8; color: #ddd; }
   #log div { border-bottom: 1px solid rgba(255,255,255,.05); padding: 2px 0; }
+  #chatList { max-height: 180px; overflow-y: auto; font-size: 13px; line-height: 1.8; color: #ddd; }
+  #chatList div { border-bottom: 1px solid rgba(255,255,255,.05); padding: 2px 0; word-break: break-all; }
+  #chatInput { flex: 1; }
   #agentState { max-height: 260px; overflow: auto; font-size: 11px; line-height: 1.6; white-space: pre-wrap; word-break: break-all; color: #a5d6a7; margin: 0; background: #0c0f14; border-radius: 10px; padding: 10px; }
   .modal { position: fixed; inset: 0; background: rgba(0,0,0,.7); backdrop-filter: blur(3px); display: none; align-items: center; justify-content: center; z-index: 20; }
   .modal.show { display: flex; }
@@ -126,6 +129,7 @@
         </div>
         <div id="authInfo" class="hidden">
           <p style="margin:0 0 8px">已登录：<b id="authName"></b></p>
+          <p style="margin:0 0 8px">我的积分：<b id="authPoints">–</b></p>
           <p style="margin:0 0 4px">你的授权码（仅你可见，不要发给别人）：</p>
           <div class="row">
             <input type="text" id="authCode" readonly style="flex:1; margin:0">
@@ -171,6 +175,23 @@
       <div id="log"></div>
     </div>
     <div class="panel">
+      <h3>桌内聊天</h3>
+      <div id="chatList"></div>
+      <div class="row" style="margin-top:8px">
+        <input type="text" id="chatInput" placeholder="登录后可发言（200 字内）" maxlength="200">
+        <button class="small" id="btnChatSend">发送</button>
+      </div>
+      <div class="msg" id="chatMsg"></div>
+    </div>
+    <div class="panel hidden" id="creatorPanel">
+      <h3>桌主管理</h3>
+      <div id="creatorSeats"></div>
+      <div class="row" style="margin-top:10px">
+        <button class="small warn" id="btnDissolve">解散本桌</button>
+      </div>
+      <div class="msg" id="creatorMsg"></div>
+    </div>
+    <div class="panel">
       <h3>Agent 视角（服务器推送的状态）</h3>
       <pre id="agentState">{}</pre>
     </div>
@@ -188,6 +209,7 @@
 <div class="modal" id="modal">
   <div class="box">
     <h2 id="modalTitle"></h2>
+    <div id="modalPoints" style="font-size:14px;color:#ffd54f;margin-bottom:8px"></div>
     <div id="modalHands"></div>
     <div style="margin-top:14px"><button id="again">再来一局</button></div>
   </div>

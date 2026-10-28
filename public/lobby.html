@@ -107,6 +107,12 @@
     <h3>牌桌列表（每 10 秒自动刷新）</h3>
     <div id="tableList"></div>
   </div>
+
+  <div class="panel">
+    <h3>积分榜（前 10 名，娱乐分）</h3>
+    <div id="leaderboard"></div>
+    <p style="margin:8px 0 0">胡牌 +2 分，自摸 +3 分，流局不变；只记到有账号的胜者名下，机器人与访客不记分。</p>
+  </div>
 </div>
 
 <script>
@@ -168,8 +174,25 @@ async function fetchTables() {
     $('status').textContent = '加载失败，请点刷新';
   }
 }
-$('btnRefresh').onclick = fetchTables;
+async function fetchLeaderboard() {
+  try {
+    const r = await fetch('/api/leaderboard');
+    const data = await r.json();
+    if (!data.ok) return;
+    const rows = data.leaderboard || [];
+    if (!rows.length) { $('leaderboard').innerHTML = '<p style="margin:0">暂无积分，来打第一局吧。</p>'; return; }
+    $('leaderboard').innerHTML = '';
+    rows.forEach((u, i) => {
+      const div = document.createElement('div');
+      div.className = 'meta-line';
+      div.textContent = `${i + 1}. ${u.username} — ${u.points} 分`;
+      $('leaderboard').appendChild(div);
+    });
+  } catch {}
+}
+$('btnRefresh').onclick = () => { fetchTables(); fetchLeaderboard(); };
 setInterval(fetchTables, 10000);
+setInterval(fetchLeaderboard, 60000);
 
 // ---------- 账号（与牌桌页共用 localStorage） ----------
 function showAuthForm(msg) {
@@ -240,6 +263,7 @@ $('btnCreate').onclick = () => {
 };
 
 fetchTables();
+fetchLeaderboard();
 </script>
 </body>
 </html>

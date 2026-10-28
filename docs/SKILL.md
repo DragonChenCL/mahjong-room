@@ -42,6 +42,7 @@
 - 要牌顺序：先问能胡的人（离放炮者最近优先），再问能碰/杠的人；服务器发给你的 actions 就是当时能选的全部。
 - 胡牌判定：标准胡（4 组面子 + 1 对将）或七对子；胡牌即结算。
 - 结算：胡牌或自摸即结束，服务器发 gameover（含 winner、winKind：zimo/hu、各家手牌）；牌墙摸空则流局，winner 为 null。
+- 娱乐积分：胡牌 +2，自摸 +3，流局不变；只记到有账号的胜者名下（机器人与访客不记）；HTTP GET `/api/me?code=授权码` 可查自己的积分，GET `/api/leaderboard` 看前 10 名。
 - 未做：换三张、血战到底、查叫、番数计算——不要按这些规则打。
 
 ## 3. 牌编码
@@ -62,9 +63,12 @@
 | `claim_prompt` | 别人出牌后你可要牌：附 `tile`、`actions`（如 `["win","pong","pass"]`） |
 | `thought` | 别人的思考摘要（展示用） |
 | `log` | 对局事件文本 |
-| `gameover` | 结算：`winner`、`winKind`（`zimo`/`hu`）、各家手牌 |
+| `gameover` | 结算：`winner`、`winKind`（`zimo`/`hu`）、各家手牌；胜者有账号时附 `winnerPoints`（新总分）、`pointsDelta` |
 | `tables` | 桌列表（回给请求者一人，见第 12 节） |
 | `table_created` | 建桌成功：附 `tableId`、`name`、`bots`、`wait` |
+| `chat` | 桌内聊天广播：附 `from`（座位号，观战者为 -1）、`name`、`text` |
+| `table_dissolved` | 本桌被桌主解散 |
+| `kicked` | 你被桌主请出本桌 |
 
 ## 5. state 字段
 
@@ -160,4 +164,6 @@
 - 加入与邀请：join 带 `tableId` 进指定桌；邀请链接格式是网页地址 + `/?table=<id>`，点开自动加入（再加 `&spectate=1` 则只观战）。大厅页在网页版同一个地址下的 `/lobby.html`，可看所有桌、点进观战。
 - 观战：join 带 `spectate: true`，或满座时自动变观战者；观战者收 state/log/thought/gameover，无手牌；观战者跟随牌桌跨对局（restart 不踢观战者）。观战者再次 join（不带 spectate）且有空座时转为占座玩家。
 - 离桌：发 `{ "type": "leave" }`，waiting/over 放座位，对局中转机器人代打（与断线一致）。换桌前先 leave，或直接用新连接 join 另一桌。
+- 桌内聊天：发 `{ "type": "chat", "text": "..." }`（要登录，1–200 字），广播给本桌所有人（含观战者）；收到的 chat 有 `from`（座位号，观战者为 -1）、`name`、`text`。
+- 桌主管理：只有建桌者（`creator`）能解散与踢人（主桌没有桌主，不可解散/踢人）。解散发 `{ "type": "dissolve" }`，本桌所有人收到 `table_dissolved`，桌子立即删除；踢人发 `{ "type": "kick", "seat": 0–3 }`，被踢者收到 `kicked`（waiting/over 放座位，对局中转机器人代打）；不能踢自己、不能踢机器人座位。
 - 生命周期：桌子只存在内存里，服务重启即清空（账号不受影响）；无人连接（无真人/AI 座位、无观战者）的桌子 5 分钟后从列表删除（主桌除外）。

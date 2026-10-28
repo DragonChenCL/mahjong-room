@@ -32,7 +32,7 @@ function loadUsersFromJson() {
   try {
     const obj = JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
     for (const [name, u] of Object.entries(obj)) {
-      if (u && typeof u.salt === 'string' && typeof u.hash === 'string' && typeof u.code === 'string') users.set(name, u);
+      if (u && typeof u.salt === 'string' && typeof u.hash === 'string' && typeof u.code === 'string') users.set(name, { ...u, points: u.points || 0 });
     }
   } catch { /* 无文件或损坏：从空开始 */ }
 }
@@ -49,9 +49,11 @@ async function initStore() {
       code TEXT NOT NULL UNIQUE,
       created_at BIGINT NOT NULL DEFAULT 0
     )`);
-    const r = await dbPool.query('SELECT username, salt, hash, code, created_at FROM users');
+    // 老库迁移：积分列不存在时补上（新库建表时没有它）
+    await dbPool.query('ALTER TABLE users ADD COLUMN IF NOT EXISTS points INT NOT NULL DEFAULT 0');
+    const r = await dbPool.query('SELECT username, salt, hash, code, created_at, points FROM users');
     for (const row of r.rows) {
-      users.set(row.username, { salt: row.salt, hash: row.hash, code: row.code, createdAt: row.created_at });
+      users.set(row.username, { salt: row.salt, hash: row.hash, code: row.code, createdAt: row.created_at, points: row.points || 0 });
     }
     storeKind = 'db';
     console.log('[store] 账号存储：Postgres');
@@ -66,9 +68,9 @@ async function saveUsers() {
     try {
       for (const [name, u] of users) {
         await dbPool.query(
-          'INSERT INTO users (username, salt, hash, code, created_at) VALUES ($1,$2,$3,$4,$5) ' +
-          'ON CONFLICT (username) DO UPDATE SET salt = EXCLUDED.salt, hash = EXCLUDED.hash, code = EXCLUDED.code',
-          [name, u.salt, u.hash, u.code, u.createdAt || 0]);
+          'INSERT INTO users (username, salt, hash, code, created_at, points) VALUES ($1,$2,$3,$4,$5,$6) ' +
+          'ON CONFLICT (username) DO UPDATE SET salt = EXCLUDED.salt, hash = EXCLUDED.hash, code = EXCLUDED.code, points = EXCLUDED.points',
+          [name, u.salt, u.hash, u.code, u.createdAt || 0, u.points || 0]);
       }
     } catch (e) { console.error('save users to db failed', e.message); }
     return;
@@ -158,6 +160,7 @@ class Table {
     this.registry = opts.registry || null;
     this.spectators = new Set();
     this.emptyTimer = null;
+    this.dead = false; // 被解散后为 true：对局循环在下一个出牌/摸牌步骤干净退出
     this.reset();
   }
   reset() {
@@ -200,6 +203,7 @@ class Table {
       type: 'state',
       tableId: this.id,
       tableName: this.name,
+      creator: this.creator,
       you: seat,
       phase: this.phase,
       turn: this.turn,
@@ -280,6 +284,16 @@ class Table {
       if (this.isEmpty()) this.registry.delete(this.id);
     }, 5 * 60 * 1000);
     if (this.emptyTimer.unref) this.emptyTimer.unref();
+  }
+  // 桌主解散：先广播通知（此时连接还在），再断开所有座位连接、删桌；
+  // 对局循环在下一个 discardStep/drawStep 的 dead 检查处干净退出，不会崩。
+  dissolve() {
+    this.dead = true;
+    this.broadcast({ type: 'table_dissolved', tableId: this.id, by: this.creator });
+    this.cancelCleanup();
+    for (const s of this.seats) if (s) s.ws = null;
+    this.spectators.clear();
+    if (this.registry) this.registry.delete(this.id);
   }
   addPlayer(ws, name, kind, spectate = false) {
     this.spectators.delete(ws);
@@ -382,6 +396,7 @@ class Table {
   }
 
   async discardStep(seat) {
+    if (this.dead) return; // 桌子已解散：干净退出，不碰座位
     const s = this.seats[seat];
     this.turn = seat;
     this.broadcastState();
@@ -500,6 +515,7 @@ class Table {
   }
 
   async drawStep(seat) {
+    if (this.dead) return; // 桌子已解散：干净退出，不碰座位
     if (this.wall.length === 0) return this.liuju();
     const s = this.seats[seat];
     const tile = this.wall.shift();
@@ -578,6 +594,16 @@ class Table {
     this.phase = 'over';
     const label = kind === 'zimo' ? '自摸' : `胡 ${this.seats[from].name} 的 ${tileName(tile)}`;
     this.log(`${s.name} ${label}！`);
+    // 娱乐积分：只记到有账号的胜者名下（机器人与访客不记）；胡牌 +2，自摸 +3
+    let pointsDelta = 0;
+    let winnerPoints = null;
+    if (s.account && users.has(s.account)) {
+      pointsDelta = kind === 'zimo' ? 3 : 2;
+      const u = users.get(s.account);
+      u.points = (u.points || 0) + pointsDelta;
+      winnerPoints = u.points;
+      saveUsers();
+    }
     this.broadcastState();
     this.broadcast({
       type: 'gameover',
@@ -586,6 +612,8 @@ class Table {
       winTile: tile,
       winKind: kind,
       hands: this.seats.map((p) => [...p.hand]),
+      pointsDelta,
+      winnerPoints,
     });
     this.checkEmpty();
   }
@@ -683,7 +711,7 @@ async function handleApi(req, res) {
       }
       if (users.has(username)) return sendJson(res, 409, { ok: false, error: '用户名已被注册' });
       const salt = crypto.randomBytes(16).toString('hex');
-      users.set(username, { salt, hash: hashPassword(body.password, salt), code: newAuthCode(), createdAt: Date.now() });
+      users.set(username, { salt, hash: hashPassword(body.password, salt), code: newAuthCode(), createdAt: Date.now(), points: 0 });
       await saveUsers();
       return sendJson(res, 200, { ok: true, username, code: users.get(username).code });
     }
@@ -701,7 +729,15 @@ async function handleApi(req, res) {
     if (req.method === 'GET' && p === '/api/me') {
       const username = findUserByCode(url.searchParams.get('code'));
       if (!username) return sendJson(res, 401, { ok: false, error: '授权码无效' });
-      return sendJson(res, 200, { ok: true, username });
+      return sendJson(res, 200, { ok: true, username, points: (users.get(username) || {}).points || 0 });
+    }
+    if (req.method === 'GET' && p === '/api/leaderboard') {
+      // 只公开用户名与积分，不含任何密码哈希与授权码
+      const top = [...users.entries()]
+        .map(([username, u]) => ({ username, points: u.points || 0 }))
+        .sort((a, b) => b.points - a.points)
+        .slice(0, 10);
+      return sendJson(res, 200, { ok: true, leaderboard: top });
     }
     if (req.method === 'POST' && p === '/api/rotate') {
       const body = await readJsonBody(req);
@@ -803,6 +839,39 @@ wss.on('connection', (ws) => {
     if (msg.type === 'logout') { ws.user = null; return; }
     // 以下动作均作用于发送者所在的桌
     const t = tableOf(ws);
+    // 桌内聊天：要登录，1–200 字；广播给本桌所有人（含观战者）
+    if (msg.type === 'chat') {
+      if (!t) return;
+      if (!ws.user) { sendWs(ws, { type: 'error', message: '请先登录再发言' }); return; }
+      const text = typeof msg.text === 'string' ? msg.text.trim() : '';
+      if (!text || text.length > 200) return;
+      const seat = t.seatOf(ws);
+      const name = seat >= 0 ? t.seats[seat].name : ws.user;
+      t.broadcast({ type: 'chat', tableId: t.id, from: seat, name, text });
+      return;
+    }
+    // 解散：只有建桌者能解散自己的桌（主桌没有桌主，不可解散）
+    if (msg.type === 'dissolve') {
+      if (!t || t.creator == null || ws.user !== t.creator) { sendWs(ws, { type: 'error', message: '只有桌主可以解散本桌' }); return; }
+      t.dissolve();
+      return;
+    }
+    // 踢人：只有建桌者能踢；waiting/over 放座位，对局中转机器人代打（与断线一致）
+    if (msg.type === 'kick') {
+      if (!t || t.creator == null || ws.user !== t.creator) { sendWs(ws, { type: 'error', message: '只有桌主可以踢人' }); return; }
+      const seat = msg.seat;
+      if (!Number.isInteger(seat) || seat < 0 || seat > 3) { sendWs(ws, { type: 'error', message: '座位号不对' }); return; }
+      const target = t.seats[seat];
+      if (!target || target.kind === 'bot') { sendWs(ws, { type: 'error', message: '这个座位没有真人或 AI 玩家' }); return; }
+      if (target.ws === ws) { sendWs(ws, { type: 'error', message: '不能踢自己' }); return; }
+      if (!target.ws) { sendWs(ws, { type: 'error', message: '该玩家已离线' }); return; }
+      const targetWs = target.ws;
+      const targetName = target.name;
+      sendWs(targetWs, { type: 'kicked', tableId: t.id });
+      t.log(`${targetName} 被桌主请出`);
+      t.removePlayer(targetWs);
+      return;
+    }
     if (msg.type === 'start') {
       if (!ws.user) { sendWs(ws, { type: 'error', message: '请先登录再开局' }); return; }
       // 手动开局总是立即开：人座未满由机器人补齐（不受 wait 影响）
