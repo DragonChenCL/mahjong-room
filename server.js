@@ -698,6 +698,12 @@ wss.on('connection', (ws) => {
       if (seat >= 0 && typeof msg.text === 'string' && msg.text.length < 200) table.thought(seat, msg.text);
       return;
     }
+    // agent 主动索取当前局面：只回给请求者本人，内容与广播的 state 一致
+    // （座位玩家含自己的手牌，观战者/未加入者无手牌）；不会泄露别人的手牌。
+    if (msg.type === 'get_state') {
+      table.send(ws, table.stateFor(table.seatOf(ws)));
+      return;
+    }
     // agent 动作消息与真人消息走同一 pending 路由
     if (msg.type === 'action' && table.pending) {
       const seat = table.seatOf(ws);
