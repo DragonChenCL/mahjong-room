@@ -29,8 +29,8 @@
 ```
 
 - 收到 `{ "type": "joined", "seat": 1 }` 表示占座成功（0–3 号座）。
-- 4 个座位满了之后再连进来的是观战者（收不到手牌）。
-- 开局由已登录的真人房主点「快速开始」，空座自动补机器人；agent 座位不受影响。已登录的 agent 也可直接发 start 开局（桌上有真人或 agent 座位即可，空座补机器人）。没登录发 start 会收到 error（请先登录再开局）。
+- join 可带 `tableId` 指定牌桌（不带 = 默认主桌 `main`，见第 12 节）；带 `spectate: true` 则只观战（回 `joined` 的 `seat` 为 -1，收不到手牌）。4 个座位满了之后再连进来也是观战者。观战者再次 join（不带 spectate）且有空座时，会转为占座玩家。
+- 开局由已登录的真人房主点「快速开始」，空座自动补机器人；agent 座位不受影响。已登录的 agent 也可直接发 start 开局（桌上有真人或 agent 座位即可，空座补机器人）。没登录发 start 会收到 error（请先登录再开局）。不等待的桌子人一满就自动开局（见第 12 节），这时再发 start 是无用功（对局已在进行中）。
 - 再来一局：上一局结算后（`phase=over`），已登录的连接可发 `{ "type": "restart" }` 重开：只保留真人/AI 座位，机器人座位一律释放，然后自动开新局（空座补机器人）；保留后没有真人/AI 座位时只重置不开局。`playing` 中发 `restart` 无效；没登录发会收到 `error`。网页上的「再来一局」按钮发的就是这条消息，不是麻将动作。
 
 ## 2. 对局规则
@@ -63,12 +63,14 @@
 | `thought` | 别人的思考摘要（展示用） |
 | `log` | 对局事件文本 |
 | `gameover` | 结算：`winner`、`winKind`（`zimo`/`hu`）、各家手牌 |
+| `tables` | 桌列表（回给请求者一人，见第 12 节） |
+| `table_created` | 建桌成功：附 `tableId`、`name`、`bots`、`wait` |
 
 ## 5. state 字段
 
 ```json
 {
-  "type": "state", "you": 1, "phase": "playing", "turn": 2, "wallLeft": 64,
+  "type": "state", "tableId": "main", "tableName": "主桌", "you": 1, "phase": "playing", "turn": 2, "wallLeft": 64,
   "players": [
     { "name": "你", "kind": "human", "handCount": 13,
       "melds": [], "discards": [7, 12], "won": false }
@@ -81,6 +83,7 @@
 
 - 别人的手牌只给张数，不给牌面；自己的手牌全量给。
 - `phase`：`waiting`（等开局）/ `playing`（进行中）/ `over`（已结算）。
+- state 里带 `tableId`/`tableName`，告诉你这是哪张桌的局面。
 - 想主动要一次最新局面（比如错过推送、重连后同步），发 `{ "type": "get_state" }`：服务器只回给你一个人，内容与上面一致（座位玩家含自己的手牌，观战者无手牌）。局面平时是服务器主动推的，这条是补查用的查询接口。
 
 ## 6. 你发给服务器的动作
@@ -145,3 +148,16 @@
    - 牌面一律用麻将 emoji，不用纯文字写牌名：万 🀇–🀏、条 🀐–🀘、筒 🀙–🀡；碰是三张相同并排，杠是四张相同并排。
    - 卡片下面附当前建议：建议打哪张 + 为什么；有冲胡打法时同时写出。
    - 卡片是对话内嵌的 HTML 片段；平台渲染不了卡片时，退回纯 emoji 文字版：每家一行（名字 + 碰/杠 + 弃牌），自己一行（手牌 + 碰/杠 + 弃牌），再加轮到谁、剩几张、上一张、当前建议；内容与卡片版完全一致。
+
+## 12. 多桌：桌列表、建桌、邀请链接
+
+- 默认主桌：不带 `tableId` 的 join 进的是主桌（`main`，3 机器人、不等待）。主桌是快开桌，第一个加入的人座即自动开局；想和指定的人同桌，去大厅建一张等人的桌。
+- 列桌：发 `{ "type": "list_tables" }`，回 `{ "type": "tables", "tables": [...] }`（只回给你一人）；或 HTTP GET 网页版同一个地址下的 `/api/tables`。每桌一项：`{ "id", "name", "phase", "seats": [{ "name", "kind" } 或 null] × 4, "bots", "wait", "spectators", "createdAt", "creator" }`。不含任何手牌与授权码。
+- 建桌：发 `{ "type": "create_table", "name": "可选，不填自动命名", "bots": 0–3（默认 3）, "wait": true/false（默认 false） }`，回 `{ "type": "table_created", "tableId", "name", "bots", "wait" }`。建桌要登录；建桌者自动坐 0 号座；上限 20 桌（含主桌），超了会收到 error。
+- 机器人与等待：
+  - `bots` 是计划机器人位；`wait=false` 时人一满（4 - bots 个人座）就自动开局；`wait=true` 时永不自动开局，等已登录者发 start 手动开。
+  - 手动 start / restart 总是立即开局：人座未满由机器人补齐（可能超过计划机器人位）；restart 只在 over 可发，不受 wait 影响。
+- 加入与邀请：join 带 `tableId` 进指定桌；邀请链接格式是网页地址 + `/?table=<id>`，点开自动加入（再加 `&spectate=1` 则只观战）。大厅页在网页版同一个地址下的 `/lobby.html`，可看所有桌、点进观战。
+- 观战：join 带 `spectate: true`，或满座时自动变观战者；观战者收 state/log/thought/gameover，无手牌；观战者跟随牌桌跨对局（restart 不踢观战者）。观战者再次 join（不带 spectate）且有空座时转为占座玩家。
+- 离桌：发 `{ "type": "leave" }`，waiting/over 放座位，对局中转机器人代打（与断线一致）。换桌前先 leave，或直接用新连接 join 另一桌。
+- 生命周期：桌子只存在内存里，服务重启即清空（账号不受影响）；无人连接（无真人/AI 座位、无观战者）的桌子 5 分钟后从列表删除（主桌除外）。

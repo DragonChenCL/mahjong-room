@@ -12,13 +12,26 @@ let thoughts = {};
 let joined = false;
 let authCode = localStorage.getItem('mahjong-auth-code') || '';
 let authUser = localStorage.getItem('mahjong-username') || '';
+// 多桌：邀请链接 / 大厅点进来带 ?table=<id>（&spectate=1 则只观战）；不带则走默认主桌
+const urlParams = new URLSearchParams(location.search);
+const urlTableId = urlParams.get('table') || '';
+const urlSpectate = urlParams.get('spectate') === '1';
+let currentTableId = urlTableId || '';
+let currentTableName = '';
 
 const $ = (id) => document.getElementById(id);
 
 function connect() {
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(proto + '//' + location.host);
-  ws.onopen = () => { $('status').textContent = '已连接，点击快速开始'; if (authCode) send({ type: 'auth', code: authCode }); };
+  ws.onopen = () => {
+    $('status').textContent = urlTableId ? '正在加入牌桌…' : '已连接，点击快速开始';
+    if (authCode) send({ type: 'auth', code: authCode });
+    // 邀请链接 / 大厅点进来：直接加入指定桌（spectate=1 则只观战）；访客也可加入观战
+    if (urlTableId) {
+      setTimeout(() => send({ type: 'join', name: authUser || '访客', kind: 'human', authCode: authCode || undefined, tableId: urlTableId, spectate: urlSpectate || undefined }), 100);
+    }
+  };
   ws.onclose = () => { $('status').textContent = '连接断开，请刷新页面'; };
   ws.onmessage = (ev) => {
     let msg;
@@ -184,11 +197,17 @@ function onMessage(msg) {
   if (msg.type === 'joined') {
     you = msg.seat;
     joined = true;
-    $('status').textContent = '已加入牌桌';
+    if (msg.tableId) currentTableId = msg.tableId;
+    $('status').textContent = msg.seat >= 0 ? '已加入牌桌' : '正在观战';
     return;
   }
   if (msg.type === 'state') {
     state = msg;
+    if (msg.tableId) currentTableId = msg.tableId;
+    if (msg.tableName) {
+      currentTableName = msg.tableName;
+      $('tableName').textContent = `牌桌：${msg.tableName}（${msg.tableId}）`;
+    }
     if (msg.phase === 'over') awaiting = null;
     render();
     return;
@@ -239,7 +258,7 @@ $('quickStart').onclick = () => {
 function doStart() {
   if (!authCode) { openAuthMenu(); $('status').textContent = '请先登录再开局'; return; }
   if (joined) { send({ type: 'start' }); return; }
-  send({ type: 'join', name: authUser, kind: 'human', authCode });
+  send({ type: 'join', name: authUser, kind: 'human', authCode, tableId: currentTableId || undefined });
   setTimeout(() => send({ type: 'start' }), 200);
   $('quickStart').disabled = true;
   $('quickStart').textContent = '已开局';
@@ -329,6 +348,22 @@ document.addEventListener('click', (ev) => {
     else { authCode = ''; authUser = ''; localStorage.removeItem('mahjong-auth-code'); localStorage.removeItem('mahjong-username'); showAuthForm(); }
   } catch { showAuthForm(); }
 })();
+
+// ---------- 邀请链接 ----------
+$('btnInvite').onclick = async () => {
+  const id = currentTableId || urlTableId || 'main';
+  const link = location.origin + '/?table=' + encodeURIComponent(id);
+  try { await navigator.clipboard.writeText(link); }
+  catch {
+    const ta = document.createElement('textarea');
+    ta.value = link;
+    document.body.appendChild(ta);
+    ta.select();
+    document.execCommand('copy');
+    ta.remove();
+  }
+  $('status').textContent = '邀请链接已复制：' + link;
+};
 
 // ---------- 复制给 AI 的话 ----------
 $('btnCopyPrompt').onclick = async () => {

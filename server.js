@@ -147,12 +147,22 @@ function botChooseDiscard(hand) {
 
 // ---------- 牌桌 ----------
 class Table {
-  constructor() {
+  constructor(opts = {}) {
+    // 桌设置（跨对局保留，reset 不动它们）：id、名字、计划机器人位、是否等待手动开局
+    this.id = opts.id || 'main';
+    this.name = opts.name || '主桌';
+    this.bots = Number.isInteger(opts.bots) && opts.bots >= 0 && opts.bots <= 3 ? opts.bots : 3;
+    this.wait = opts.wait === true;
+    this.creator = opts.creator || null;
+    this.createdAt = Date.now();
+    this.registry = opts.registry || null;
+    this.spectators = new Set();
+    this.emptyTimer = null;
     this.reset();
   }
   reset() {
     this.seats = [null, null, null, null]; // {kind,name,ws,hand,melds,discards,won}
-    this.spectators = new Set();
+    // 观战者跟随牌桌跨对局：reset 不清空 spectators，restart 后他们继续看新局
     this.phase = 'waiting';
     this.wall = [];
     this.turn = 0;
@@ -188,6 +198,8 @@ class Table {
     } : null);
     return {
       type: 'state',
+      tableId: this.id,
+      tableName: this.name,
       you: seat,
       phase: this.phase,
       turn: this.turn,
@@ -252,22 +264,53 @@ class Table {
     return false;
   }
 
-  addPlayer(ws, name, kind) {
+  // 空桌管理：无人连接（无真人/AI 座位、无观战者）的桌子 5 分钟后从列表删除（主桌除外）
+  isEmpty() {
+    const hasHuman = this.seats.some((s) => s && s.kind !== 'bot' && s.ws);
+    return !hasHuman && this.spectators.size === 0;
+  }
+  cancelCleanup() {
+    if (this.emptyTimer) { clearTimeout(this.emptyTimer); this.emptyTimer = null; }
+  }
+  checkEmpty() {
+    if (this.id === 'main' || !this.registry) return;
+    if (!this.isEmpty() || this.emptyTimer) return;
+    this.emptyTimer = setTimeout(() => {
+      this.emptyTimer = null;
+      if (this.isEmpty()) this.registry.delete(this.id);
+    }, 5 * 60 * 1000);
+    if (this.emptyTimer.unref) this.emptyTimer.unref();
+  }
+  addPlayer(ws, name, kind, spectate = false) {
     this.spectators.delete(ws);
+    this.cancelCleanup();
+    const toSpectator = () => {
+      this.spectators.add(ws);
+      this.send(ws, { type: 'joined', seat: -1, tableId: this.id });
+      this.send(ws, this.stateFor(-1));
+      return -1;
+    };
+    // 显式观战，或满座：都变观战者（观战者收不到手牌）
+    if (spectate) return toSpectator();
     const idx = this.seats.findIndex((s) => s === null);
-    if (idx < 0) { this.spectators.add(ws); this.send(ws, this.stateFor(-1)); return -1; }
+    if (idx < 0) return toSpectator();
     this.seats[idx] = {
       kind, name: name || (kind === 'human' ? '你' : 'Agent'),
       account: ws.user || null,
       ws, hand: [], melds: [], discards: [], won: false,
     };
-    this.send(ws, { type: 'joined', seat: idx });
+    this.send(ws, { type: 'joined', seat: idx, tableId: this.id });
     this.broadcastState();
+    // 等待模式关闭时：人满（4 - 机器人位）即自动开局；主桌（3 机器人、不等待）第一个加入即开局
+    if (this.phase === 'waiting' && !this.wait) {
+      const humans = this.seats.filter((s) => s && s.kind !== 'bot').length;
+      if (humans >= 4 - this.bots) this.start().catch((e) => console.error('auto start error', e));
+    }
     return idx;
   }
   removePlayer(ws) {
     const seat = this.seatOf(ws);
-    if (seat < 0) { this.spectators.delete(ws); return; }
+    if (seat < 0) { this.spectators.delete(ws); this.checkEmpty(); return; }
     if (this.phase === 'waiting') {
       this.seats[seat] = null;
     } else if (this.phase !== 'over') {
@@ -287,6 +330,7 @@ class Table {
       this.seats[seat] = null;
     }
     this.broadcastState();
+    this.checkEmpty();
   }
 
   async start() {
@@ -543,6 +587,7 @@ class Table {
       winKind: kind,
       hands: this.seats.map((p) => [...p.hand]),
     });
+    this.checkEmpty();
   }
   liuju() {
     this.phase = 'over';
@@ -550,8 +595,54 @@ class Table {
     this.log('流局：牌墙摸空');
     this.broadcastState();
     this.broadcast({ type: 'gameover', winner: null, hands: this.seats.map((p) => [...p.hand]) });
+    this.checkEmpty();
   }
 }
+
+// ---------- 多桌 ----------
+// 桌子只存在内存里：服务重启即清空（账号不受影响，账号走数据库/本地 JSON）。
+// 主桌（id=main）常驻；用户建的桌子无人连接 5 分钟后删除；上限 20 桌（含主桌）。
+const tables = new Map(); // id -> Table
+const MAX_TABLES = 20;
+let tableSeq = 0;
+function sendWs(ws, obj) {
+  if (ws && ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
+}
+function newTableId() {
+  let id;
+  do { id = crypto.randomBytes(3).toString('hex'); } while (tables.has(id));
+  return id;
+}
+function createTable({ name, bots, wait, creator }) {
+  const id = newTableId();
+  const t = new Table({ id, name: name || `牌桌${++tableSeq}`, bots, wait, creator, registry: tables });
+  tables.set(id, t);
+  return t;
+}
+function defaultTable() {
+  let t = tables.get('main');
+  if (!t) {
+    t = new Table({ id: 'main', name: '主桌', bots: 3, wait: false, creator: null, registry: tables });
+    tables.set('main', t);
+  }
+  return t;
+}
+// 某个连接所在的桌（座位或观战都算）
+function tableOf(ws) {
+  for (const t of tables.values()) {
+    if (t.seatOf(ws) >= 0 || t.spectators.has(ws)) return t;
+  }
+  return null;
+}
+// 桌列表公开信息：不含任何手牌与授权码
+function tablePublicInfo(t) {
+  return {
+    id: t.id, name: t.name, phase: t.phase, bots: t.bots, wait: t.wait,
+    seats: t.seats.map((s) => (s ? { name: s.name, kind: s.kind } : null)),
+    spectators: t.spectators.size, createdAt: t.createdAt, creator: t.creator,
+  };
+}
+defaultTable();
 
 // ---------- 账号 API ----------
 function sendJson(res, status, obj) {
@@ -581,6 +672,9 @@ async function handleApi(req, res) {
   const url = new URL(req.url, 'http://localhost');
   const p = url.pathname;
   try {
+    if (req.method === 'GET' && p === '/api/tables') {
+      return sendJson(res, 200, { ok: true, tables: [...tables.values()].map(tablePublicInfo) });
+    }
     if (req.method === 'POST' && p === '/api/register') {
       const body = await readJsonBody(req);
       const username = typeof body.username === 'string' ? body.username.trim() : '';
@@ -625,7 +719,6 @@ async function handleApi(req, res) {
 }
 
 // ---------- HTTP + WebSocket ----------
-const table = new Table();
 const MIME = { '.html': 'text/html', '.js': 'application/javascript', '.css': 'text/css', '.json': 'application/json' };
 
 const server = http.createServer((req, res) => {
@@ -661,67 +754,107 @@ wss.on('connection', (ws) => {
     try { msg = JSON.parse(raw); } catch { return; }
     if (msg.type === 'auth') {
       const username = findUserByCode(msg.code);
-      if (username) { ws.user = username; table.send(ws, { type: 'authed', username }); }
-      else table.send(ws, { type: 'auth_error', message: '授权码无效' });
+      if (username) { ws.user = username; sendWs(ws, { type: 'authed', username }); }
+      else sendWs(ws, { type: 'auth_error', message: '授权码无效' });
+      return;
+    }
+    // 列桌：只回给请求者一人
+    if (msg.type === 'list_tables') {
+      sendWs(ws, { type: 'tables', tables: [...tables.values()].map(tablePublicInfo) });
+      return;
+    }
+    // 建桌：要登录；建桌者自动坐 0 号座；上限 20 桌
+    if (msg.type === 'create_table') {
+      if (!ws.user) { sendWs(ws, { type: 'error', message: '请先登录再建桌' }); return; }
+      if (tableOf(ws)) { sendWs(ws, { type: 'error', message: '你已在别的牌桌上，先发 leave 退出当前牌桌' }); return; }
+      if (tables.size >= MAX_TABLES) { sendWs(ws, { type: 'error', message: '牌桌已满（上限 20 桌），请加入已有牌桌' }); return; }
+      const bots = Number.isInteger(msg.bots) && msg.bots >= 0 && msg.bots <= 3 ? msg.bots : 3;
+      const wait = msg.wait === true;
+      const name = typeof msg.name === 'string' && msg.name.trim() ? msg.name.trim().slice(0, 20) : null;
+      const t = createTable({ name, bots, wait, creator: ws.user });
+      t.addPlayer(ws, ws.user, msg.kind === 'agent' ? 'agent' : 'human');
+      sendWs(ws, { type: 'table_created', tableId: t.id, name: t.name, bots: t.bots, wait: t.wait });
+      return;
+    }
+    // 离桌：waiting/over 放座位，对局中转机器人代打（与断线一致）
+    if (msg.type === 'leave') {
+      const cur = tableOf(ws);
+      if (cur) cur.removePlayer(ws);
       return;
     }
     if (msg.type === 'join') {
-      if (table.seatOf(ws) >= 0) return;
+      const cur = tableOf(ws);
+      let t;
+      if (msg.tableId) {
+        t = tables.get(msg.tableId);
+        if (!t) { sendWs(ws, { type: 'error', message: '牌桌不存在，请去大厅看看' }); return; }
+        if (cur && cur !== t) { sendWs(ws, { type: 'error', message: '你已在别的牌桌上，先发 leave 退出当前牌桌' }); return; }
+      } else {
+        t = cur || defaultTable();
+      }
+      if (t.seatOf(ws) >= 0) return; // 已占座
+      // 观战者再次 join（不带 spectate）且有空座时：addPlayer 会先将其移出观战者再占座
       const authUser = findUserByCode(msg.authCode || msg.code);
       if (authUser) ws.user = authUser;
-      const seat = table.addPlayer(ws, msg.name || ws.user, msg.kind === 'agent' ? 'agent' : 'human');
-      if (seat >= 0) table.log(`${table.seats[seat].name} 加入牌桌`);
+      const seat = t.addPlayer(ws, msg.name || ws.user, msg.kind === 'agent' ? 'agent' : 'human', msg.spectate === true);
+      if (seat >= 0) t.log(`${t.seats[seat].name} 加入牌桌`);
       return;
     }
     if (msg.type === 'logout') { ws.user = null; return; }
+    // 以下动作均作用于发送者所在的桌
+    const t = tableOf(ws);
     if (msg.type === 'start') {
-      if (!ws.user) { table.send(ws, { type: 'error', message: '请先登录再开局' }); return; }
-      if (table.phase === 'waiting') table.start().catch((e) => console.error('start error', e));
+      if (!ws.user) { sendWs(ws, { type: 'error', message: '请先登录再开局' }); return; }
+      // 手动开局总是立即开：人座未满由机器人补齐（不受 wait 影响）
+      if (t && t.phase === 'waiting') t.start().catch((e) => console.error('start error', e));
       return;
     }
     if (msg.type === 'restart') {
-      if (!ws.user) { table.send(ws, { type: 'error', message: '请先登录再开局' }); return; }
-      if (table.phase === 'over') {
+      if (!ws.user) { sendWs(ws, { type: 'error', message: '请先登录再开局' }); return; }
+      if (t && t.phase === 'over') {
         // 只保留真人/AI 座位：机器人座位（含掉线转机器人代打的座位）一律释放，
         // 否则机器人占满座位后无人能加入、也无人能开局，桌子永久卡死。
-        const keep = table.seats.map((s) => (s && s.kind !== 'bot' ? s : null));
-        table.reset();
-        keep.forEach((s, i) => { if (s) table.seats[i] = s; });
-        table.phase = 'waiting';
-        table.start().catch((e) => console.error('restart error', e));
+        // 再来一局总是立即重开，不受 wait 影响；观战者保留，继续看新局。
+        const keep = t.seats.map((s) => (s && s.kind !== 'bot' ? s : null));
+        t.reset();
+        keep.forEach((s, i) => { if (s) t.seats[i] = s; });
+        t.phase = 'waiting';
+        t.start().catch((e) => console.error('restart error', e));
       }
       return;
     }
     // agent 的思考文本：随动作一起广播（展示用，不影响规则）
     if (msg.type === 'thought') {
-      const seat = table.seatOf(ws);
-      if (seat >= 0 && typeof msg.text === 'string' && msg.text.length < 200) table.thought(seat, msg.text);
+      if (!t) return;
+      const seat = t.seatOf(ws);
+      if (seat >= 0 && typeof msg.text === 'string' && msg.text.length < 200) t.thought(seat, msg.text);
       return;
     }
     // agent 主动索取当前局面：只回给请求者本人，内容与广播的 state 一致
     // （座位玩家含自己的手牌，观战者/未加入者无手牌）；不会泄露别人的手牌。
     if (msg.type === 'get_state') {
-      table.send(ws, table.stateFor(table.seatOf(ws)));
+      const tt = t || defaultTable();
+      sendWs(ws, tt.stateFor(tt.seatOf(ws)));
       return;
     }
     // agent 动作消息与真人消息走同一 pending 路由
-    if (msg.type === 'action' && table.pending) {
-      const seat = table.seatOf(ws);
-      if (seat < 0 || table.pending.seat !== seat) return;
-      const p = table.pending;
+    if (msg.type === 'action' && t && t.pending) {
+      const seat = t.seatOf(ws);
+      if (seat < 0 || t.pending.seat !== seat) return;
+      const p = t.pending;
       if (p.kind === 'discard' && msg.action === 'discard') {
-        table.handleMessage(ws, { type: 'discard', tile: msg.tile });
+        t.handleMessage(ws, { type: 'discard', tile: msg.tile });
       } else if (p.kind === 'draw_choice' && ['win', 'kong', 'discard'].includes(msg.action)) {
-        table.handleMessage(ws, { type: 'draw_choice', action: msg.action, tile: msg.tile });
+        t.handleMessage(ws, { type: 'draw_choice', action: msg.action, tile: msg.tile });
       } else if (p.kind === 'claim' && ['win', 'pong', 'kong', 'pass'].includes(msg.action)) {
-        table.handleMessage(ws, { type: 'claim', action: msg.action });
+        t.handleMessage(ws, { type: 'claim', action: msg.action });
       }
       return;
     }
-    table.handleMessage(ws, msg);
+    if (t) t.handleMessage(ws, msg);
   });
-  ws.on('close', () => table.removePlayer(ws));
-  ws.on('error', () => table.removePlayer(ws));
+  ws.on('close', () => { const t = tableOf(ws); if (t) t.removePlayer(ws); });
+  ws.on('error', () => { const t = tableOf(ws); if (t) t.removePlayer(ws); });
 });
 
 if (require.main === module) {

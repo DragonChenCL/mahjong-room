@@ -104,8 +104,11 @@
   <h1><span class="logo">🀄</span>棋牌室 · 麻将</h1>
   <span class="meta" id="status">未连接</span>
   <span class="meta" id="wall"></span>
+  <span class="meta" id="tableName"></span>
   <div class="head-right">
     <button id="quickStart">快速开始</button>
+    <a class="btn ghost small" href="/lobby.html">大厅</a>
+    <button class="small ghost" id="btnInvite">复制邀请链接</button>
     <a class="btn ghost small" href="#skillPanel">Agent 接入</a>
     <div class="auth-wrap" id="authWrap">
       <button class="small ghost" id="authToggle">登录 / 注册</button>
@@ -178,7 +181,8 @@
   简化规则：108 张（万/条/筒），无定缺、无风牌，碰/杠/胡，胡牌即结算；未做换三张、血战、查叫、番数。
   机器人为本地规则玩家，零 token；agent 通过 WebSocket 接口接入（上方「Agent 接入」面板复制给 AI 的话，注册登录后凭授权码绑定账号）。
   开局需先登录，登录后牌桌上的名字就是你的用户名。
-  账号数据：已配置数据库时持久保存；否则存在服务器本地，服务重新部署后会清空，届时需重新注册（演示阶段）。
+  多桌：右上角「大厅」可看所有牌桌、点进观战；建桌时可选机器人数量（0–3）与是否等待他人加入；「复制邀请链接」发给朋友，点开即加入同一桌。
+  账号数据：已配置数据库时持久保存；否则存在服务器本地，服务重新部署后会清空，届时需重新注册（演示阶段）。牌桌只存在内存里，服务重启即清空。
 </div>
 
 <div class="modal" id="modal">

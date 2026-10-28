@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>棋牌室 · 大厅</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🀄</text></svg>">
+<style>
+  * { box-sizing: border-box; }
+  html { background: #0e1116; }
+  body { margin: 0; background: radial-gradient(1200px 600px at 50% -10%, #1c2530 0%, #0e1116 55%); color: #e8eaed; font-family: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; min-height: 100vh; }
+  a { color: #ffd54f; }
+  header { position: sticky; top: 0; z-index: 10; display: flex; gap: 12px; align-items: center; padding: 10px 16px; background: rgba(17, 21, 28, .92); border-bottom: 1px solid rgba(255,255,255,.08); backdrop-filter: blur(8px); flex-wrap: wrap; }
+  header h1 { font-size: 19px; margin: 0; display: flex; align-items: center; gap: 9px; letter-spacing: .5px; }
+  .logo { display: inline-flex; align-items: center; justify-content: center; width: 32px; height: 32px; border-radius: 9px; background: linear-gradient(#fff8dc, #f5d76e); box-shadow: 0 2px 8px rgba(0,0,0,.5); font-size: 20px; }
+  header .meta { color: #9aa5b1; font-size: 13px; }
+  .head-right { margin-left: auto; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  button, .btn { padding: 8px 16px; border: 0; border-radius: 999px; background: linear-gradient(#34c759, #1e9e4a); color: #fff; cursor: pointer; font-size: 14px; font-weight: 600; box-shadow: 0 3px 10px rgba(0,0,0,.35); text-decoration: none; display: inline-block; transition: filter .12s, transform .12s; }
+  button:hover, .btn:hover { filter: brightness(1.1); }
+  button:active, .btn:active { transform: translateY(1px); }
+  button:disabled { background: #3a414d; cursor: default; box-shadow: none; }
+  button.ghost, .btn.ghost { background: #242b38; border: 1px solid rgba(255,255,255,.12); box-shadow: none; }
+  button.small, .btn.small { padding: 6px 12px; font-size: 13px; }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 16px; display: flex; flex-direction: column; gap: 16px; }
+  .panel { background: #171c24; border: 1px solid rgba(255,255,255,.08); border-radius: 16px; padding: 16px; box-shadow: 0 10px 24px rgba(0,0,0,.3); }
+  .panel h3 { margin: 0 0 10px; font-size: 14px; color: #ffd54f; letter-spacing: .4px; }
+  .panel p, .panel li { font-size: 13px; line-height: 1.8; color: #c6cdd6; }
+  .panel input[type="text"], .panel input[type="password"], .panel select { padding: 8px 10px; margin: 4px 0 8px; border-radius: 9px; border: 1px solid #2e3542; background: #12161d; color: #e8eaed; outline: none; }
+  .panel input:focus, .panel select:focus { border-color: #f5c451; box-shadow: 0 0 0 3px rgba(245,196,81,.18); }
+  .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+  .msg { font-size: 13px; color: #ffb74d; min-height: 20px; margin-top: 6px; }
+  .msg.ok { color: #81c784; }
+  .hidden { display: none !important; }
+  .field { display: flex; flex-direction: column; gap: 2px; margin-right: 8px; }
+  .field label { font-size: 12px; color: #9aa5b1; }
+  .field input[type="text"], .field select { margin: 0; }
+  .check { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #c6cdd6; cursor: pointer; }
+  .table-card { background: #12161d; border: 1px solid rgba(255,255,255,.09); border-radius: 14px; padding: 14px; margin-bottom: 12px; }
+  .table-card:last-child { margin-bottom: 0; }
+  .table-card h4 { margin: 0 0 6px; font-size: 15px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .badge { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; letter-spacing: .5px; }
+  .badge.waiting { background: rgba(255,213,79,.15); color: #ffd54f; border: 1px solid rgba(255,213,79,.4); }
+  .badge.playing { background: rgba(52,199,89,.15); color: #81c784; border: 1px solid rgba(52,199,89,.4); }
+  .badge.over { background: rgba(255,255,255,.08); color: #9aa5b1; border: 1px solid rgba(255,255,255,.15); }
+  .meta-line { font-size: 12px; color: #9aa5b1; line-height: 1.8; }
+  .seats { display: flex; gap: 6px; flex-wrap: wrap; margin: 8px 0 10px; }
+  .seat-chip { font-size: 12px; padding: 4px 10px; border-radius: 999px; background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.1); }
+  .seat-chip.empty { color: #6b7280; border-style: dashed; }
+  .seat-chip.bot { color: #c6cdd6; }
+  .seat-chip.agent { color: #7dd3fc; border-color: rgba(34,211,238,.4); }
+</style>
+</head>
+<body>
+<header>
+  <h1><span class="logo">🀄</span>棋牌室 · 大厅</h1>
+  <span class="meta" id="status">正在加载牌桌…</span>
+  <div class="head-right">
+    <a class="btn ghost small" href="/">主桌</a>
+    <button class="small ghost" id="btnRefresh">刷新</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="panel" id="authPanel">
+    <h3>账号</h3>
+    <div id="authForm">
+      <div class="row">
+        <input type="text" id="authUser" placeholder="用户名（1–20 字）" maxlength="20" autocomplete="username">
+        <input type="password" id="authPass" placeholder="密码（4–64 位）" maxlength="64" autocomplete="current-password">
+        <button class="small" id="btnRegister">注册</button>
+        <button class="small ghost" id="btnLogin">登录</button>
+      </div>
+      <div class="msg" id="authMsg"></div>
+      <p style="margin:8px 0 0">建桌需要登录（和牌桌页共用同一账号）。不登录也能点进牌桌观战。</p>
+    </div>
+    <div id="authInfo" class="hidden">
+      <p style="margin:0">已登录：<b id="authName"></b>（建桌后你自动坐 0 号座）</p>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h3>开一桌</h3>
+    <div class="row">
+      <div class="field">
+        <label for="tableName">桌名（可选）</label>
+        <input type="text" id="tableName" placeholder="不填自动命名" maxlength="20">
+      </div>
+      <div class="field">
+        <label for="botCount">机器人</label>
+        <select id="botCount">
+          <option value="3" selected>3 个机器人（你 + 3 机器人）</option>
+          <option value="2">2 个机器人（等 1 人）</option>
+          <option value="1">1 个机器人（等 2 人）</option>
+          <option value="0">0 个机器人（等 3 人）</option>
+        </select>
+      </div>
+      <label class="check"><input type="checkbox" id="waitCheck"> 等待他人加入（不勾则人满自动开局）</label>
+    </div>
+    <div class="row" style="margin-top:10px">
+      <button id="btnCreate">创建并进入</button>
+    </div>
+    <div class="msg" id="createMsg"></div>
+    <p style="margin:8px 0 0">说明：机器人位是计划数；勾选“等待他人加入”后，桌子一直等你手动开始（开始时人座未满仍由机器人补齐）。不勾则人一满就自动开局。建桌后把牌桌页的「复制邀请链接」发给朋友，点开即加入同一桌。</p>
+  </div>
+
+  <div class="panel">
+    <h3>牌桌列表（每 10 秒自动刷新）</h3>
+    <div id="tableList"></div>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+let authCode = localStorage.getItem('mahjong-auth-code') || '';
+let authUser = localStorage.getItem('mahjong-username') || '';
+
+function phaseBadge(phase) {
+  if (phase === 'playing') return '<span class="badge playing">进行中</span>';
+  if (phase === 'over') return '<span class="badge over">已结算</span>';
+  return '<span class="badge waiting">等待中</span>';
+}
+function kindTag(kind) {
+  if (kind === 'bot') return ' · 机器人';
+  if (kind === 'agent') return ' · Agent';
+  return '';
+}
+function seatCls(kind) {
+  if (kind === 'bot') return 'seat-chip bot';
+  if (kind === 'agent') return 'seat-chip agent';
+  return 'seat-chip';
+}
+function renderList(tables) {
+  const el = $('tableList');
+  if (!tables || !tables.length) { el.innerHTML = '<p style="margin:0">还没有牌桌，上面开一桌吧。</p>'; return; }
+  // 主桌置顶，其余按创建时间倒序
+  const sorted = [...tables].sort((a, b) => (a.id === 'main' ? -1 : b.id === 'main' ? 1 : b.createdAt - a.createdAt));
+  el.innerHTML = sorted.map((t) => {
+    const freeSeat = t.seats.some((s) => s === null);
+    const humans = t.seats.filter((s) => s && s.kind !== 'bot').length;
+    const time = t.createdAt ? new Date(t.createdAt).toLocaleString('zh-CN', { hour12: false }) : '';
+    const seatsHtml = t.seats.map((s) => s
+      ? `<span class="${seatCls(s.kind)}">${s.name}${kindTag(s.kind)}</span>`
+      : '<span class="seat-chip empty">空座位</span>').join('');
+    return `<div class="table-card">
+      <h4>${t.name} ${phaseBadge(t.phase)}</h4>
+      <div class="meta-line">桌号 ${t.id}${t.creator ? ` · 创建者 ${t.creator}` : ''}${time ? ` · ${time}` : ''}</div>
+      <div class="meta-line">机器人 ${t.bots} 个 · ${t.wait ? '等待他人加入（手动开始）' : '人满自动开局'} · ${humans} 人在座 · 👁 ${t.spectators} 人观战</div>
+      <div class="seats">${seatsHtml}</div>
+      <div class="row">
+        ${freeSeat ? `<a class="btn small" href="/?table=${encodeURIComponent(t.id)}">加入</a>` : ''}
+        <a class="btn small ghost" href="/?table=${encodeURIComponent(t.id)}&spectate=1">观战</a>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function fetchTables() {
+  try {
+    const r = await fetch('/api/tables');
+    const data = await r.json();
+    if (data.ok) {
+      renderList(data.tables);
+      $('status').textContent = `共 ${data.tables.length} 桌`;
+    } else {
+      $('status').textContent = '加载失败';
+    }
+  } catch {
+    $('status').textContent = '加载失败，请点刷新';
+  }
+}
+$('btnRefresh').onclick = fetchTables;
+setInterval(fetchTables, 10000);
+
+// ---------- 账号（与牌桌页共用 localStorage） ----------
+function showAuthForm(msg) {
+  $('authForm').classList.remove('hidden');
+  $('authInfo').classList.add('hidden');
+  if (msg !== undefined) { $('authMsg').textContent = msg; $('authMsg').classList.remove('ok'); }
+}
+function showAuthInfo() {
+  $('authForm').classList.add('hidden');
+  $('authInfo').classList.remove('hidden');
+  $('authName').textContent = authUser;
+}
+async function authPost(path, body) {
+  const r = await fetch(path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  return { status: r.status, data: await r.json().catch(() => ({})) };
+}
+async function doAuth(path) {
+  const username = $('authUser').value.trim();
+  const password = $('authPass').value;
+  const { data } = await authPost(path, { username, password });
+  if (!data.ok) { $('authMsg').textContent = data.error || '失败'; $('authMsg').classList.remove('ok'); return; }
+  authUser = data.username; authCode = data.code;
+  localStorage.setItem('mahjong-username', authUser);
+  localStorage.setItem('mahjong-auth-code', authCode);
+  showAuthInfo();
+}
+$('btnRegister').onclick = () => doAuth('/api/register');
+$('btnLogin').onclick = () => doAuth('/api/login');
+(async () => {
+  if (!authCode) { showAuthForm(); return; }
+  try {
+    const r = await fetch('/api/me?code=' + encodeURIComponent(authCode));
+    const data = await r.json();
+    if (data.ok) { authUser = data.username; localStorage.setItem('mahjong-username', authUser); showAuthInfo(); }
+    else { authCode = ''; authUser = ''; localStorage.removeItem('mahjong-auth-code'); localStorage.removeItem('mahjong-username'); showAuthForm(); }
+  } catch { showAuthForm(); }
+})();
+
+// ---------- 建桌：走 WebSocket，成功后跳到牌桌页 ----------
+$('btnCreate').onclick = () => {
+  if (!authCode) { $('createMsg').textContent = '请先登录再建桌'; $('createMsg').classList.remove('ok'); return; }
+  const name = $('tableName').value.trim();
+  const bots = parseInt($('botCount').value, 10);
+  const wait = $('waitCheck').checked;
+  $('createMsg').textContent = '正在建桌…';
+  $('createMsg').classList.remove('ok');
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const ws = new WebSocket(proto + '//' + location.host);
+  const timer = setTimeout(() => { try { ws.close(); } catch {} $('createMsg').textContent = '建桌超时，请重试'; }, 10000);
+  ws.onopen = () => {
+    ws.send(JSON.stringify({ type: 'auth', code: authCode }));
+    ws.send(JSON.stringify({ type: 'create_table', name: name || undefined, bots, wait, kind: 'human' }));
+  };
+  ws.onmessage = (ev) => {
+    let msg;
+    try { msg = JSON.parse(ev.data); } catch { return; }
+    if (msg.type === 'table_created') {
+      clearTimeout(timer);
+      try { ws.close(); } catch {}
+      location.href = '/?table=' + encodeURIComponent(msg.tableId);
+    } else if (msg.type === 'error') {
+      clearTimeout(timer);
+      $('createMsg').textContent = msg.message || '建桌失败';
+      try { ws.close(); } catch {}
+    }
+  };
+  ws.onerror = () => { clearTimeout(timer); $('createMsg').textContent = '连接失败，请刷新重试'; };
+};
+
+fetchTables();
+</script>
+</body>
+</html>
